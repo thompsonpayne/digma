@@ -13,13 +13,16 @@ struct Vertex {
 
 #[cfg(target_arch = "wasm32")]
 const RECT_VERTS: [Vertex; 6] = [
-    // two triangles in clip space
-    Vertex { pos: [-0.5, -0.5] },
-    Vertex { pos: [0.5, -0.5] },
-    Vertex { pos: [0.5, 0.5] },
-    Vertex { pos: [-0.5, -0.5] },
-    Vertex { pos: [0.5, 0.5] },
-    Vertex { pos: [-0.5, 0.5] },
+    Vertex {
+        pos: [-50.0, -50.0],
+    },
+    Vertex { pos: [50.0, -50.0] },
+    Vertex { pos: [50.0, 50.0] },
+    Vertex {
+        pos: [-50.0, -50.0],
+    },
+    Vertex { pos: [50.0, 50.0] },
+    Vertex { pos: [-50.0, 50.0] },
 ];
 
 #[cfg(target_arch = "wasm32")]
@@ -33,6 +36,8 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     vertex_buf: wgpu::Buffer,
     vertex_count: u32,
+    camera_buf: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
 }
 
 impl Renderer {
@@ -98,9 +103,47 @@ impl Renderer {
             }],
         };
 
+        let camera_uniform = CameraUniform {
+            pan: [0.0, 0.0],
+            zoom: 1.0,
+            _pad0: 0.0,
+            canvas: [width as f32, height as f32],
+            _pad1: [0.0, 0.0],
+        };
+
+        let camera_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("camera uniform"),
+            contents: bytemuck::bytes_of(&camera_uniform),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("camera bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("camera bind group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buf.as_entire_binding(),
+            }],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("simple pipeline layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&camera_bind_group_layout],
             immediate_size: 0,
         });
 
@@ -144,6 +187,8 @@ impl Renderer {
             pipeline,
             vertex_buf,
             vertex_count: RECT_VERTS.len() as u32,
+            camera_buf,
+            camera_bind_group,
         })
     }
 
@@ -164,9 +209,31 @@ impl Renderer {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
+
+        let camera_uniform = CameraUniform {
+            pan: [0.0, 0.0],
+            zoom: 1.0,
+            _pad0: 0.0,
+            canvas: [self.config.width as f32, self.config.height as f32],
+            _pad1: [0.0, 0.0],
+        };
+
+        self.queue
+            .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&camera_uniform));
     }
 
-    pub fn render(&mut self, _camera: &Camera) -> Result<(), JsValue> {
+    pub fn render(&mut self, camera: &Camera) -> Result<(), JsValue> {
+        let camera_uniform = CameraUniform {
+            pan: [camera.pan.x, camera.pan.y],
+            zoom: camera.zoom,
+            _pad0: 0.0,
+            canvas: [self.config.width as f32, self.config.height as f32],
+            _pad1: [0.0, 0.0],
+        };
+
+        self.queue
+            .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&camera_uniform));
+
         let frame = self
             .surface
             .get_current_texture()
@@ -205,6 +272,7 @@ impl Renderer {
             });
 
             pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
             pass.draw(0..self.vertex_count, 0..1);
         }
@@ -213,4 +281,15 @@ impl Renderer {
         frame.present();
         Ok(())
     }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[cfg(target_arch = "wasm32")]
+struct CameraUniform {
+    pan: [f32; 2],
+    zoom: f32,
+    _pad0: f32,
+    canvas: [f32; 2],
+    _pad1: [f32; 2],
 }
