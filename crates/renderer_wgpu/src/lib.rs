@@ -1,4 +1,4 @@
-use engine::Camera;
+use engine::{Camera, RenderScene};
 use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 #[cfg(target_arch = "wasm32")]
@@ -12,17 +12,13 @@ struct Vertex {
 }
 
 #[cfg(target_arch = "wasm32")]
-const RECT_VERTS: [Vertex; 6] = [
-    Vertex {
-        pos: [-50.0, -50.0],
-    },
-    Vertex { pos: [50.0, -50.0] },
-    Vertex { pos: [50.0, 50.0] },
-    Vertex {
-        pos: [-50.0, -50.0],
-    },
-    Vertex { pos: [50.0, 50.0] },
-    Vertex { pos: [-50.0, 50.0] },
+const QUAD_VERTS: [Vertex; 6] = [
+    Vertex { pos: [0.0, 0.0] },
+    Vertex { pos: [1.0, 0.0] },
+    Vertex { pos: [1.0, 1.0] },
+    Vertex { pos: [0.0, 0.0] },
+    Vertex { pos: [1.0, 1.0] },
+    Vertex { pos: [0.0, 1.0] },
 ];
 
 #[cfg(target_arch = "wasm32")]
@@ -38,6 +34,8 @@ pub struct Renderer {
     vertex_count: u32,
     camera_buf: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    instance_buf: wgpu::Buffer,
+    instance_count: u32,
 }
 
 impl Renderer {
@@ -141,6 +139,36 @@ impl Renderer {
             }],
         });
 
+        let max_instance = 1024;
+        let instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rect instance buffer"),
+            size: (std::mem::size_of::<GpuRectInstance>() * max_instance) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let instance_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<GpuRectInstance>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: 0,
+                    shader_location: 1,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: 8,
+                    shader_location: 2,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: 16,
+                    shader_location: 3,
+                },
+            ],
+        };
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("simple pipeline layout"),
             bind_group_layouts: &[&camera_bind_group_layout],
@@ -153,7 +181,7 @@ impl Renderer {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[vertex_layout],
+                buffers: &[vertex_layout, instance_layout],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -175,7 +203,7 @@ impl Renderer {
 
         let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("rect vertices"),
-            contents: bytemuck::cast_slice(&RECT_VERTS),
+            contents: bytemuck::cast_slice(&QUAD_VERTS),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
@@ -186,9 +214,11 @@ impl Renderer {
             config,
             pipeline,
             vertex_buf,
-            vertex_count: RECT_VERTS.len() as u32,
+            vertex_count: QUAD_VERTS.len() as u32,
             camera_buf,
             camera_bind_group,
+            instance_buf,
+            instance_count: 0,
         })
     }
 
@@ -222,7 +252,7 @@ impl Renderer {
             .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&camera_uniform));
     }
 
-    pub fn render(&mut self, camera: &Camera) -> Result<(), JsValue> {
+    pub fn render(&mut self, camera: &Camera, scene: &RenderScene) -> Result<(), JsValue> {
         let camera_uniform = CameraUniform {
             pan: [camera.pan.x, camera.pan.y],
             zoom: camera.zoom,
@@ -241,6 +271,20 @@ impl Renderer {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let instances: Vec<GpuRectInstance> = scene
+            .rects
+            .iter()
+            .map(|r| GpuRectInstance {
+                pos: r.pos,
+                size: r.size,
+                color: r.color,
+            })
+            .collect();
+
+        self.queue
+            .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&instances));
+        self.instance_count = instances.len() as u32;
 
         let mut encoder = self
             .device
@@ -274,7 +318,8 @@ impl Renderer {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-            pass.draw(0..self.vertex_count, 0..1);
+            pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+            pass.draw(0..self.vertex_count, 0..self.instance_count);
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -292,4 +337,12 @@ struct CameraUniform {
     _pad0: f32,
     canvas: [f32; 2],
     _pad1: [f32; 2],
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct GpuRectInstance {
+    pos: [f32; 2],
+    size: [f32; 2],
+    color: [f32; 4],
 }

@@ -30,7 +30,7 @@ impl App {
             .map_err(|e| JsValue::from_str(&format!("Invalid InputBatch: {e}")))?;
 
         let out: EngineOutput = self.engine.tick(&batch);
-        self.renderer.render(&out.camera)?;
+        self.renderer.render(&out.camera, &out.render_scene)?;
         serde_wasm_bindgen::to_value(&out).map_err(|e| e.into())
     }
 }

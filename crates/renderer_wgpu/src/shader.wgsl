@@ -14,10 +14,17 @@ struct CameraUniform {
 var<uniform> u_camera: CameraUniform;
 
 @vertex
-fn vs_main(@location(0) in_pos: vec2<f32>) -> VsOut {
+fn vs_main(
+    @location(0) in_pos: vec2<f32>,
+    @location(1) inst_pos: vec2<f32>,
+    @location(2) inst_size: vec2<f32>,
+    @location(3) inst_color: vec4<f32>,
+) -> VsOut {
     var out: VsOut;
 
-    let screen = (in_pos - u_camera.pan) * u_camera.zoom;
+    let world = inst_pos + in_pos * inst_size;
+    let screen = (world - u_camera.pan) * u_camera.zoom;
+
     let ndc = vec2<f32>(
       (screen.x / u_camera.canvas.x) * 2.0 - 1.0,
       1.0 - (screen.y / u_camera.canvas.y) * 2.0,

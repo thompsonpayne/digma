@@ -1,4 +1,9 @@
+mod render_scene;
+
 use serde::{Deserialize, Serialize};
+
+use crate::render_scene::RectInstance;
+pub use crate::render_scene::RenderScene;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub u64);
@@ -118,6 +123,21 @@ impl Engine {
     }
 
     pub fn tick(&mut self, batch: &InputBatch) -> EngineOutput {
+        let scene = render_scene::RenderScene {
+            rects: vec![
+                RectInstance {
+                    pos: [100.0, 100.0],
+                    size: [120.0, 80.0],
+                    color: [0.2, 0.7, 0.9, 1.0],
+                },
+                RectInstance {
+                    pos: [300.0, 220.0],
+                    size: [140.0, 80.0],
+                    color: [0.9, 0.3, 0.9, 1.0],
+                },
+            ],
+        };
+
         for ev in &batch.events {
             match *ev {
                 InputEvent::CameraPanByScreenDelta { delta_px } => {
@@ -134,13 +154,15 @@ impl Engine {
 
         EngineOutput {
             camera: self.camera,
+            render_scene: scene,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EngineOutput {
     pub camera: Camera,
+    pub render_scene: RenderScene,
 }
 
 #[cfg(test)]
