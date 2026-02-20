@@ -36,6 +36,7 @@ pub struct Renderer {
     camera_bind_group: wgpu::BindGroup,
     instance_buf: wgpu::Buffer,
     instance_count: u32,
+    instance_capacity: usize,
 }
 
 impl Renderer {
@@ -139,10 +140,10 @@ impl Renderer {
             }],
         });
 
-        let max_instance = 1024;
+        let instance_capacity = 1024;
         let instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("rect instance buffer"),
-            size: (std::mem::size_of::<GpuRectInstance>() * max_instance) as u64,
+            size: (std::mem::size_of::<GpuRectInstance>() * instance_capacity) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -219,6 +220,7 @@ impl Renderer {
             camera_bind_group,
             instance_buf,
             instance_count: 0,
+            instance_capacity,
         })
     }
 
@@ -281,6 +283,20 @@ impl Renderer {
                 color: r.color,
             })
             .collect();
+
+        let needed = instances.len();
+
+        if needed > self.instance_capacity {
+            let new_capacity = needed.next_power_of_two();
+            self.instance_capacity = new_capacity;
+
+            self.instance_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("rect instance buffer"),
+                size: (std::mem::size_of::<GpuRectInstance>() * new_capacity) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        }
 
         self.queue
             .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&instances));

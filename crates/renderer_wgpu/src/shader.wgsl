@@ -1,5 +1,6 @@
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
+    @location(0) color: vec4<f32>,
 };
 
 struct CameraUniform {
@@ -31,10 +32,11 @@ fn vs_main(
     );
 
     out.pos = vec4<f32>(ndc, 0.0, 1.0);
+    out.color = inst_color;
     return out;
 }
 
 @fragment
-fn fs_main() -> @location(0) vec4<f32> {
-    return vec4<f32>(0.2, 0.6, 0.9, 1.0);
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    return in.color;
 }
