@@ -9,8 +9,9 @@ path = "src/lib.rs"
 
 [dependencies]
 engine = { path = "../engine/" }
+renderer_wgpu = { path = "../renderer_wgpu/" }
 wasm-bindgen = "0.2.108"
-web-sys = { version = "*", features = ["HtmlCanvasElement"] }
+web-sys = { version = "0.3.85", features = ["HtmlCanvasElement"] }
 wasm-bindgen-futures = "0.4.58"
 serde = "1.0.228"
 serde-wasm-bindgen = "0.6.5"
