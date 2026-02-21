@@ -17,7 +17,8 @@ type InputEvent =
 			type: "camera_zoom_at_screen_point";
 			pivot_px: Point;
 			zoom_multiplier: number;
-	  };
+	  }
+	| { type: "pointer_down"; screen_px: Point; shift: boolean };
 
 function App() {
 	let canvasRef!: HTMLCanvasElement;
@@ -66,6 +67,16 @@ function App() {
 					lastPt = { x: e.clientX, y: e.clientY };
 					canvasRef.setPointerCapture(e.pointerId);
 					e.preventDefault();
+					return;
+				}
+
+				if (e.button === 0 && batch) {
+					const rect = canvasRef.getBoundingClientRect();
+					batch.events.push({
+						type: "pointer_down",
+						screen_px: { x: e.clientX - rect.left, y: e.clientY - rect.top },
+						shift: e.shiftKey,
+					});
 				}
 			},
 			{ signal: abortController.signal },

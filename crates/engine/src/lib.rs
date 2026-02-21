@@ -7,14 +7,26 @@ pub use crate::render_scene::{OverlayScene, RectInstance, RenderScene};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub u64);
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RectNode {
+    pub id: NodeId,
+    pub pos: Vec2,
+    pub size: Vec2,
+    pub color: [f32; 4],
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Document {
     pub next_id: u64,
+    pub rects: Vec<RectNode>,
 }
 
 impl Document {
     pub fn new() -> Self {
-        Self { next_id: 1 }
+        Self {
+            next_id: 1,
+            rects: vec![],
+        }
     }
 
     pub fn alloc_id(&mut self) -> NodeId {
@@ -50,6 +62,10 @@ pub enum InputEvent {
     CameraZoomAtScreenPoint {
         pivot_px: Vec2,
         zoom_multiplier: f32,
+    },
+    PointerDown {
+        screen_px: Vec2,
+        shift: bool,
     },
 }
 
@@ -111,35 +127,88 @@ impl Camera {
 pub struct Engine {
     pub doc: Document,
     pub camera: Camera,
+    pub selected: Vec<NodeId>,
 }
 
 impl Engine {
     pub fn new() -> Self {
+        let mut doc = Document::new();
+
+        let rects = vec![
+            RectNode {
+                id: doc.alloc_id(),
+                pos: Vec2::new(100.0, 100.0),
+                size: Vec2::new(120.0, 80.0),
+                color: [0.2, 0.7, 0.9, 1.0],
+            },
+            RectNode {
+                id: doc.alloc_id(),
+                pos: Vec2::new(300.0, 220.0),
+                size: Vec2::new(140.0, 80.0),
+                color: [0.9, 0.3, 0.9, 1.0],
+            },
+            RectNode {
+                id: doc.alloc_id(),
+                pos: Vec2::new(600.0, 900.0),
+                size: Vec2::new(200.0, 100.0),
+                color: [0.5, 0.8, 0.4, 1.0],
+            },
+        ];
+
+        doc.rects = rects;
+
         Self {
-            doc: Document::new(),
+            doc,
             camera: Camera::default(),
+            selected: vec![],
+        }
+    }
+
+    fn hit_test_rects(&self, world: Vec2) -> Option<NodeId> {
+        for rect in self.doc.rects.iter().rev() {
+            let min_x = rect.pos.x;
+            let min_y = rect.pos.y;
+            let max_x = rect.pos.x + rect.size.x;
+            let max_y = rect.pos.y + rect.size.y;
+            if world.x >= min_x && world.x <= max_x && world.y >= min_y && world.y <= max_y {
+                return Some(rect.id);
+            }
+        }
+        None
+    }
+
+    fn apply_selection(&mut self, hit: Option<NodeId>, shift: bool) {
+        match (hit, shift) {
+            (Some(id), false) => {
+                self.selected.clear();
+                self.selected.push(id);
+            }
+            (Some(id), true) => {
+                if let Some(idx) = self.selected.iter().position(|&v| v == id) {
+                    self.selected.swap_remove(idx);
+                } else {
+                    self.selected.push(id);
+                }
+            }
+            (None, false) => {
+                self.selected.clear();
+            }
+            (None, true) => {}
         }
     }
 
     pub fn tick(&mut self, batch: &InputBatch) -> EngineOutput {
         let render_scene = render_scene::RenderScene {
-            rects: vec![
-                RectInstance {
-                    pos: [100.0, 100.0],
-                    size: [120.0, 80.0],
-                    color: [0.2, 0.7, 0.9, 1.0],
-                },
-                RectInstance {
-                    pos: [300.0, 220.0],
-                    size: [140.0, 80.0],
-                    color: [0.9, 0.3, 0.9, 1.0],
-                },
-                RectInstance {
-                    pos: [600.0, 900.0],
-                    size: [200.0, 100.0],
-                    color: [0.5, 0.8, 0.4, 1.0],
-                },
-            ],
+            rects: self
+                .doc
+                .rects
+                .iter()
+                .map(|r| RectInstance {
+                    pos: [r.pos.x, r.pos.y],
+                    size: [r.size.x, r.size.y],
+                    color: r.color,
+                })
+                .collect(),
         };
 
         for ev in &batch.events {
@@ -152,6 +221,11 @@ impl Engine {
                     zoom_multiplier,
                 } => {
                     self.camera.zoom_at_screen_point(pivot_px, zoom_multiplier);
+                }
+                InputEvent::PointerDown { screen_px, shift } => {
+                    let world = self.camera.screen_to_world(screen_px);
+                    let hit = self.hit_test_rects(world);
+                    self.apply_selection(hit, shift);
                 }
             }
         }
@@ -166,74 +240,64 @@ impl Engine {
     }
 
     fn init_overlay_scene(&self) -> OverlayScene {
-        let base_rect = RectInstance {
-            pos: [100.0, 100.0],
-            size: [120.0, 80.0],
-            color: [0.2, 0.7, 0.9, 1.0],
-        };
-
-        // selection outline thickness in px
         let outline_px = 2.0;
         let handle_px = 8.0;
         let outline = outline_px / self.camera.zoom;
         let handle = handle_px / self.camera.zoom;
-
         let outline_color = [0.95, 0.95, 0.95, 1.0];
         let handle_color = [0.1, 0.6, 1.0, 1.0];
-
         let mut overlay_rects = Vec::new();
-
-        // outline rects
-        let [x, y] = base_rect.pos;
-        let [w, h] = base_rect.size;
-
-        // top
-        overlay_rects.push(RectInstance {
-            pos: [x, y],
-            size: [w, outline],
-            color: outline_color,
-        });
-        // bottom
-        overlay_rects.push(RectInstance {
-            pos: [x, y + h - outline],
-            size: [w, outline],
-            color: outline_color,
-        });
-        // left
-        overlay_rects.push(RectInstance {
-            pos: [x, y],
-            size: [outline, h],
-            color: outline_color,
-        });
-        // right
-        overlay_rects.push(RectInstance {
-            pos: [x + w - outline, y],
-            size: [outline, h],
-            color: outline_color,
-        });
-
-        // handles (corners)
-        overlay_rects.push(RectInstance {
-            pos: [x - handle * 0.5, y - handle * 0.5],
-            size: [handle, handle],
-            color: handle_color,
-        });
-        overlay_rects.push(RectInstance {
-            pos: [x + w - handle * 0.5, y - handle * 0.5],
-            size: [handle, handle],
-            color: handle_color,
-        });
-        overlay_rects.push(RectInstance {
-            pos: [x - handle * 0.5, y + h - handle * 0.5],
-            size: [handle, handle],
-            color: handle_color,
-        });
-        overlay_rects.push(RectInstance {
-            pos: [x + w - handle * 0.5, y + h - handle * 0.5],
-            size: [handle, handle],
-            color: handle_color,
-        });
-
+        for id in &self.selected {
+            let Some(rect) = self.doc.rects.iter().find(|r| r.id == *id) else {
+                continue;
+            };
+            let x = rect.pos.x;
+            let y = rect.pos.y;
+            let w = rect.size.x;
+            let h = rect.size.y;
+            // outline
+            overlay_rects.push(RectInstance {
+                pos: [x, y],
+                size: [w, outline],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [x, y + h - outline],
+                size: [w, outline],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [x, y],
+                size: [outline, h],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [x + w - outline, y],
+                size: [outline, h],
+                color: outline_color,
+            });
+            // handles
+            overlay_rects.push(RectInstance {
+                pos: [x - handle * 0.5, y - handle * 0.5],
+                size: [handle, handle],
+                color: handle_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [x + w - handle * 0.5, y - handle * 0.5],
+                size: [handle, handle],
+                color: handle_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [x - handle * 0.5, y + h - handle * 0.5],
+                size: [handle, handle],
+                color: handle_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [x + w - handle * 0.5, y + h - handle * 0.5],
+                size: [handle, handle],
+                color: handle_color,
+            });
+        }
         render_scene::OverlayScene {
             rects: overlay_rects,
         }
@@ -311,6 +375,7 @@ mod test {
                 pan: Vec2::new(0.0, 0.0),
                 zoom: 2.0,
             },
+            selected: vec![],
         };
 
         let batch = InputBatch {
@@ -334,6 +399,7 @@ mod test {
                 pan: Vec2::new(10.0, 20.0),
                 zoom: 2.0,
             },
+            selected: vec![],
         };
 
         let pivot = Vec2::new(300.0, 120.0);
@@ -380,5 +446,28 @@ mod test {
 
         assert_vec2_approx(engine.camera.pan, expected.pan, 1e-5);
         assert_approx(engine.camera.zoom, expected.zoom, 1e-6);
+    }
+
+    #[test]
+    fn hit_test_picks_topmost_rect() {
+        let engine = Engine::new();
+        let top_id = engine.doc.rects[2].id;
+        let hit = engine.hit_test_rects(Vec2::new(610.0, 910.0));
+        assert_eq!(hit, Some(top_id));
+    }
+
+    #[test]
+    fn selection_rules_apply_correcly() {
+        let mut engine = Engine::new();
+        let id = engine.doc.rects[0].id;
+
+        engine.apply_selection(Some(id), false);
+        assert_eq!(engine.selected, vec![id]);
+
+        engine.apply_selection(Some(id), true);
+        assert!(engine.selected.is_empty());
+
+        engine.apply_selection(None, false);
+        assert!(engine.selected.is_empty());
     }
 }
