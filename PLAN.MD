@@ -116,6 +116,15 @@ Notes:
 
 Deliverable: "blank canvas" app that feels smooth.
 
+### Current Progress (as of Feb 21, 2026)
+
+- WebGPU canvas booted on wasm32 via `renderer_wgpu`.
+- Input batching from `web/` to `app_wasm` tick loop.
+- Camera pan/zoom implemented in `engine::Camera`.
+- `RenderScene` struct added and emitted from the engine.
+- Renderer consumes `RenderScene` via instanced drawing (unit quad + instance buffer).
+- Camera uniform wired into WGSL and applied in the vertex shader.
+
 ### Week 2: Document + Commands + Persistence
 
 - Document model with `NodeId` + ordering.
@@ -186,4 +195,4 @@ Pick 1-2:
 
 ## Next Implementation Step
 
-- Convert the repo into a Cargo workspace (`crates/engine`, `crates/renderer_wgpu`, `crates/app_wasm`) and add a minimal `web/` scaffold that boots WebGPU and calls into WASM per frame.
+- Add `OverlayScene` and a second render pass for selection/handles.
