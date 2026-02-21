@@ -124,6 +124,9 @@ Deliverable: "blank canvas" app that feels smooth.
 - `RenderScene` struct added and emitted from the engine.
 - Renderer consumes `RenderScene` via instanced drawing (unit quad + instance buffer).
 - Camera uniform wired into WGSL and applied in the vertex shader.
+- `OverlayScene` added in the engine and included in `EngineOutput`.
+- Renderer uploads overlay instances and draws them in a second render pass.
+- `app_wasm` bridges `overlay_scene` into the renderer.
 
 ### Week 2: Document + Commands + Persistence
 
@@ -195,4 +198,4 @@ Pick 1-2:
 
 ## Next Implementation Step
 
-- Add `OverlayScene` and a second render pass for selection/handles.
+- Implement hit-testing and selection state to drive `OverlayScene`.
