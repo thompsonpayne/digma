@@ -164,7 +164,7 @@ impl Engine {
         }
     }
 
-    fn hit_test_rects(&self, world: Vec2) -> Option<NodeId> {
+    fn check_collide_rects(&self, world: Vec2) -> Option<NodeId> {
         for rect in self.doc.rects.iter().rev() {
             let min_x = rect.pos.x;
             let min_y = rect.pos.y;
@@ -224,7 +224,7 @@ impl Engine {
                 }
                 InputEvent::PointerDown { screen_px, shift } => {
                     let world = self.camera.screen_to_world(screen_px);
-                    let hit = self.hit_test_rects(world);
+                    let hit = self.check_collide_rects(world);
                     self.apply_selection(hit, shift);
                 }
             }
@@ -452,7 +452,7 @@ mod test {
     fn hit_test_picks_topmost_rect() {
         let engine = Engine::new();
         let top_id = engine.doc.rects[2].id;
-        let hit = engine.hit_test_rects(Vec2::new(610.0, 910.0));
+        let hit = engine.check_collide_rects(Vec2::new(610.0, 910.0));
         assert_eq!(hit, Some(top_id));
     }
 
