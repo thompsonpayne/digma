@@ -2,8 +2,7 @@ mod render_scene;
 
 use serde::{Deserialize, Serialize};
 
-use crate::render_scene::RectInstance;
-pub use crate::render_scene::RenderScene;
+pub use crate::render_scene::{OverlayScene, RectInstance, RenderScene};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub u64);
@@ -123,7 +122,7 @@ impl Engine {
     }
 
     pub fn tick(&mut self, batch: &InputBatch) -> EngineOutput {
-        let scene = render_scene::RenderScene {
+        let render_scene = render_scene::RenderScene {
             rects: vec![
                 RectInstance {
                     pos: [100.0, 100.0],
@@ -134,6 +133,11 @@ impl Engine {
                     pos: [300.0, 220.0],
                     size: [140.0, 80.0],
                     color: [0.9, 0.3, 0.9, 1.0],
+                },
+                RectInstance {
+                    pos: [600.0, 900.0],
+                    size: [200.0, 100.0],
+                    color: [0.5, 0.8, 0.4, 1.0],
                 },
             ],
         };
@@ -152,9 +156,86 @@ impl Engine {
             }
         }
 
+        let overlay_scene = self.init_overlay_scene();
+
         EngineOutput {
             camera: self.camera,
-            render_scene: scene,
+            render_scene,
+            overlay_scene,
+        }
+    }
+
+    fn init_overlay_scene(&self) -> OverlayScene {
+        let base_rect = RectInstance {
+            pos: [100.0, 100.0],
+            size: [120.0, 80.0],
+            color: [0.2, 0.7, 0.9, 1.0],
+        };
+
+        // selection outline thickness in px
+        let outline_px = 2.0;
+        let handle_px = 8.0;
+        let outline = outline_px / self.camera.zoom;
+        let handle = handle_px / self.camera.zoom;
+
+        let outline_color = [0.95, 0.95, 0.95, 1.0];
+        let handle_color = [0.1, 0.6, 1.0, 1.0];
+
+        let mut overlay_rects = Vec::new();
+
+        // outline rects
+        let [x, y] = base_rect.pos;
+        let [w, h] = base_rect.size;
+
+        // top
+        overlay_rects.push(RectInstance {
+            pos: [x, y],
+            size: [w, outline],
+            color: outline_color,
+        });
+        // bottom
+        overlay_rects.push(RectInstance {
+            pos: [x, y + h - outline],
+            size: [w, outline],
+            color: outline_color,
+        });
+        // left
+        overlay_rects.push(RectInstance {
+            pos: [x, y],
+            size: [outline, h],
+            color: outline_color,
+        });
+        // right
+        overlay_rects.push(RectInstance {
+            pos: [x + w - outline, y],
+            size: [outline, h],
+            color: outline_color,
+        });
+
+        // handles (corners)
+        overlay_rects.push(RectInstance {
+            pos: [x - handle * 0.5, y - handle * 0.5],
+            size: [handle, handle],
+            color: handle_color,
+        });
+        overlay_rects.push(RectInstance {
+            pos: [x + w - handle * 0.5, y - handle * 0.5],
+            size: [handle, handle],
+            color: handle_color,
+        });
+        overlay_rects.push(RectInstance {
+            pos: [x - handle * 0.5, y + h - handle * 0.5],
+            size: [handle, handle],
+            color: handle_color,
+        });
+        overlay_rects.push(RectInstance {
+            pos: [x + w - handle * 0.5, y + h - handle * 0.5],
+            size: [handle, handle],
+            color: handle_color,
+        });
+
+        render_scene::OverlayScene {
+            rects: overlay_rects,
         }
     }
 }
@@ -163,6 +244,7 @@ impl Engine {
 pub struct EngineOutput {
     pub camera: Camera,
     pub render_scene: RenderScene,
+    pub overlay_scene: OverlayScene,
 }
 
 #[cfg(test)]

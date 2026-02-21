@@ -1,4 +1,4 @@
-use engine::{Camera, RenderScene};
+use engine::{Camera, OverlayScene, RenderScene};
 use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 #[cfg(target_arch = "wasm32")]
@@ -30,13 +30,20 @@ pub struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
+
     vertex_buf: wgpu::Buffer,
     vertex_count: u32,
+
     camera_buf: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    instance_buf: wgpu::Buffer,
-    instance_count: u32,
-    instance_capacity: usize,
+
+    scene_instance: wgpu::Buffer,
+    scene_instance_count: u32,
+    scene_instance_capacity: usize,
+
+    overlay_instance: wgpu::Buffer,
+    overlay_instance_count: u32,
+    overlay_instance_capacity: usize,
 }
 
 impl Renderer {
@@ -45,12 +52,12 @@ impl Renderer {
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
 
-        let instance = wgpu::Instance::default();
-        let surface = instance
+        let scene_instance = wgpu::Instance::default();
+        let surface = scene_instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
             .map_err(|e| JsValue::from_str(&format!("create_surface failed: {e}")))?;
 
-        let adapter = instance
+        let adapter = scene_instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
                 compatible_surface: Some(&surface),
@@ -148,6 +155,13 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
+        let overlay_instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("overlay instance buffer"),
+            size: (std::mem::size_of::<GpuRectInstance>() * instance_capacity) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let instance_layout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<GpuRectInstance>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
@@ -218,9 +232,12 @@ impl Renderer {
             vertex_count: QUAD_VERTS.len() as u32,
             camera_buf,
             camera_bind_group,
-            instance_buf,
-            instance_count: 0,
-            instance_capacity,
+            scene_instance: instance_buf,
+            scene_instance_count: 0,
+            scene_instance_capacity: instance_capacity,
+            overlay_instance: overlay_instance_buf,
+            overlay_instance_count: 0,
+            overlay_instance_capacity: instance_capacity,
         })
     }
 
@@ -254,7 +271,12 @@ impl Renderer {
             .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&camera_uniform));
     }
 
-    pub fn render(&mut self, camera: &Camera, scene: &RenderScene) -> Result<(), JsValue> {
+    pub fn render(
+        &mut self,
+        camera: &Camera,
+        scene: &RenderScene,
+        overlay: &OverlayScene,
+    ) -> Result<(), JsValue> {
         let camera_uniform = CameraUniform {
             pan: [camera.pan.x, camera.pan.y],
             zoom: camera.zoom,
@@ -284,13 +306,24 @@ impl Renderer {
             })
             .collect();
 
+        let overlay_instances: Vec<GpuRectInstance> = overlay
+            .rects
+            .iter()
+            .map(|r| GpuRectInstance {
+                pos: r.pos,
+                size: r.size,
+                color: r.color,
+            })
+            .collect();
+
         let needed = instances.len();
+        let overlay_needed = overlay_instances.len();
 
-        if needed > self.instance_capacity {
+        if needed > self.scene_instance_capacity {
             let new_capacity = needed.next_power_of_two();
-            self.instance_capacity = new_capacity;
+            self.scene_instance_capacity = new_capacity;
 
-            self.instance_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            self.scene_instance = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("rect instance buffer"),
                 size: (std::mem::size_of::<GpuRectInstance>() * new_capacity) as u64,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
@@ -299,8 +332,27 @@ impl Renderer {
         }
 
         self.queue
-            .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&instances));
-        self.instance_count = instances.len() as u32;
+            .write_buffer(&self.scene_instance, 0, bytemuck::cast_slice(&instances));
+        self.scene_instance_count = instances.len() as u32;
+
+        if overlay_needed > self.overlay_instance_capacity {
+            let new_capacity = overlay_needed.next_power_of_two();
+            self.overlay_instance_capacity = new_capacity;
+
+            self.overlay_instance = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("overlay instance buffer"),
+                size: (std::mem::size_of::<GpuRectInstance>() * new_capacity) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        }
+
+        self.queue.write_buffer(
+            &self.overlay_instance,
+            0,
+            bytemuck::cast_slice(&overlay_instances),
+        );
+        self.overlay_instance_count = overlay_instances.len() as u32;
 
         let mut encoder = self
             .device
@@ -334,8 +386,33 @@ impl Renderer {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-            pass.set_vertex_buffer(1, self.instance_buf.slice(..));
-            pass.draw(0..self.vertex_count, 0..self.instance_count);
+            pass.set_vertex_buffer(1, self.scene_instance.slice(..));
+            pass.draw(0..self.vertex_count, 0..self.scene_instance_count);
+        }
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("overlay pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
+            pass.set_vertex_buffer(1, self.overlay_instance.slice(..));
+            pass.draw(0..self.vertex_count, 0..self.overlay_instance_count);
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -346,7 +423,6 @@ impl Renderer {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-#[cfg(target_arch = "wasm32")]
 struct CameraUniform {
     pan: [f32; 2],
     zoom: f32,
