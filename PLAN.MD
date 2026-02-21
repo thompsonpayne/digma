@@ -127,6 +127,10 @@ Deliverable: "blank canvas" app that feels smooth.
 - `OverlayScene` added in the engine and included in `EngineOutput`.
 - Renderer uploads overlay instances and draws them in a second render pass.
 - `app_wasm` bridges `overlay_scene` into the renderer.
+- Document now stores rect nodes with stable `NodeId`.
+- Hit-testing added for rects in world space.
+- Click-to-select implemented (with shift-toggle).
+- `OverlayScene` now renders selection outlines/handles from engine selection state.
 
 ### Week 2: Document + Commands + Persistence
 
@@ -198,4 +202,4 @@ Pick 1-2:
 
 ## Next Implementation Step
 
-- Implement hit-testing and selection state to drive `OverlayScene`.
+- Add marquee selection (drag to select) and render the marquee box in `OverlayScene`.
