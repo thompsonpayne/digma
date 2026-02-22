@@ -95,6 +95,10 @@ impl Default for Camera {
 }
 
 impl Camera {
+    /// Convert camera coordinate to objective coordinate (world coordinate)
+    ///
+    /// # Arguments
+    /// * `screen_px` - coordinate to convert
     pub fn screen_to_world(&self, screen_px: Vec2) -> Vec2 {
         Vec2::new(
             self.pan.x + screen_px.x / self.zoom,
@@ -183,6 +187,10 @@ impl Engine {
         }
     }
 
+    /// Check if position collides with the shape objects
+    ///
+    /// # Arguments
+    /// * `world` - pointer coordinate
     fn check_collide_rects(&self, world: Vec2) -> Option<NodeId> {
         for rect in self.doc.rects.iter().rev() {
             let min_x = rect.pos.x;
@@ -196,6 +204,10 @@ impl Engine {
         None
     }
 
+    /// # Arguments
+    ///
+    /// * `hit` - The `NodeId` that was interacted with, or `None` if empty space was clicked.
+    /// * `shift` - `true` if the shift key was held down (typically used for multi-selection).
     fn apply_selection(&mut self, hit: Option<NodeId>, shift: bool) {
         match (hit, shift) {
             (Some(id), false) => {
@@ -248,23 +260,23 @@ impl Engine {
                 } => {
                     let world = self.camera.screen_to_world(screen_px);
                     let hit = self.check_collide_rects(world);
-                    self.apply_selection(hit, shift);
+                    self.update_marquee(Some(world), Some(world), shift);
 
-                    self.update_marquee(Some(world), Some(world));
+                    self.apply_selection(hit, shift);
                 }
                 InputEvent::PointerMove {
                     screen_px,
                     buttons: _buttons,
                 } => {
                     let world = self.camera.screen_to_world(screen_px);
-                    self.update_marquee(None, Some(world));
+                    self.update_marquee(None, Some(world), false);
                 }
                 InputEvent::PointerUp {
                     screen_px,
                     button: _button,
                 } => {
                     let world = self.camera.screen_to_world(screen_px);
-                    self.update_marquee(None, Some(world));
+                    self.update_marquee(None, Some(world), false);
                     self.selection_drag = None;
                 }
                 InputEvent::PointerCancel => {
@@ -390,13 +402,19 @@ impl Engine {
         }
     }
 
-    fn update_marquee(&mut self, start_world: Option<Vec2>, current_world: Option<Vec2>) {
+    /// Update marquee selection object.
+    fn update_marquee(
+        &mut self,
+        start_world: Option<Vec2>,
+        current_world: Option<Vec2>,
+        additive: bool,
+    ) {
         if let Some(sw) = start_world {
             let cw = current_world.unwrap_or(sw);
             self.selection_drag = Some(SelectionDrag {
                 start_world: sw,
                 current_world: cw,
-                additive: false,
+                additive,
             });
             return;
         }
@@ -408,6 +426,35 @@ impl Engine {
         if let Some(cw) = current_world {
             drag.current_world = cw;
         }
+
+        let min_x = drag.start_world.x.min(drag.current_world.x);
+        let min_y = drag.start_world.y.min(drag.current_world.y);
+        let max_x = drag.start_world.x.max(drag.current_world.x);
+        let max_y = drag.start_world.y.max(drag.current_world.y);
+
+        let mut selected = if drag.additive {
+            self.selected.clone()
+        } else {
+            Vec::new()
+        };
+
+        for rect in &self.doc.rects {
+            let rect_min_x = rect.pos.x;
+            let rect_min_y = rect.pos.y;
+            let rect_max_x = rect.pos.x + rect.size.x;
+            let rect_max_y = rect.pos.y + rect.size.y;
+
+            let intersects = rect_min_x < max_x
+                && rect_max_x > min_x
+                && rect_min_y < max_y
+                && rect_max_y > min_y;
+
+            if intersects && !selected.contains(&rect.id) {
+                selected.push(rect.id);
+            }
+        }
+
+        self.selected = selected;
     }
 }
 
