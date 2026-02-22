@@ -6,7 +6,7 @@ pub struct RenderScene {
     pub rects: Vec<RectInstance>,
 }
 
-/// OverlayScene | contains UI editor elements: selection, highlight
+/// OverlayScene | contains UI editor elements: selection, highlight, marquee
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OverlayScene {
     pub rects: Vec<RectInstance>,

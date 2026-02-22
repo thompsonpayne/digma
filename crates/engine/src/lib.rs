@@ -66,7 +66,17 @@ pub enum InputEvent {
     PointerDown {
         screen_px: Vec2,
         shift: bool,
+        button: u8,
     },
+    PointerMove {
+        screen_px: Vec2,
+        buttons: u16,
+    },
+    PointerUp {
+        screen_px: Vec2,
+        button: u8,
+    },
+    PointerCancel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -123,11 +133,19 @@ impl Camera {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SelectionDrag {
+    start_world: Vec2,
+    current_world: Vec2,
+    additive: bool, // shift key active
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Engine {
     pub doc: Document,
     pub camera: Camera,
     pub selected: Vec<NodeId>,
+    pub selection_drag: Option<SelectionDrag>,
 }
 
 impl Engine {
@@ -161,6 +179,7 @@ impl Engine {
             doc,
             camera: Camera::default(),
             selected: vec![],
+            selection_drag: None,
         }
     }
 
@@ -222,10 +241,34 @@ impl Engine {
                 } => {
                     self.camera.zoom_at_screen_point(pivot_px, zoom_multiplier);
                 }
-                InputEvent::PointerDown { screen_px, shift } => {
+                InputEvent::PointerDown {
+                    screen_px,
+                    shift,
+                    button: _,
+                } => {
                     let world = self.camera.screen_to_world(screen_px);
                     let hit = self.check_collide_rects(world);
                     self.apply_selection(hit, shift);
+
+                    self.update_marquee(Some(world), Some(world));
+                }
+                InputEvent::PointerMove {
+                    screen_px,
+                    buttons: _buttons,
+                } => {
+                    let world = self.camera.screen_to_world(screen_px);
+                    self.update_marquee(None, Some(world));
+                }
+                InputEvent::PointerUp {
+                    screen_px,
+                    button: _button,
+                } => {
+                    let world = self.camera.screen_to_world(screen_px);
+                    self.update_marquee(None, Some(world));
+                    self.selection_drag = None;
+                }
+                InputEvent::PointerCancel => {
+                    self.selection_drag = None;
                 }
             }
         }
@@ -298,8 +341,72 @@ impl Engine {
                 color: handle_color,
             });
         }
+
+        if let Some(drag) = &self.selection_drag {
+            let min_x = drag.start_world.x.min(drag.current_world.x);
+            let min_y = drag.start_world.y.min(drag.current_world.y);
+            let max_x = drag.start_world.x.max(drag.current_world.x);
+            let max_y = drag.start_world.y.max(drag.current_world.y);
+
+            let w = (max_x - min_x).max(0.0);
+            let h = (max_y - min_y).max(0.0);
+
+            let fill_color = [0.2, 0.6, 1.0, 0.08];
+            let outline_color = [0.2, 0.6, 1.0, 0.9];
+            let outline_px = 1.0 / self.camera.zoom;
+
+            // fill
+            overlay_rects.push(RectInstance {
+                pos: [min_x, min_y],
+                size: [w, h],
+                color: fill_color,
+            });
+
+            // outline (4 thin rects)
+            overlay_rects.push(RectInstance {
+                pos: [min_x, min_y],
+                size: [w, outline_px],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [min_x, max_y - outline_px],
+                size: [w, outline_px],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [min_x, min_y],
+                size: [outline_px, h],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [max_x - outline_px, min_y],
+                size: [outline_px, h],
+                color: outline_color,
+            });
+        }
+
         render_scene::OverlayScene {
             rects: overlay_rects,
+        }
+    }
+
+    fn update_marquee(&mut self, start_world: Option<Vec2>, current_world: Option<Vec2>) {
+        if let Some(sw) = start_world {
+            let cw = current_world.unwrap_or(sw);
+            self.selection_drag = Some(SelectionDrag {
+                start_world: sw,
+                current_world: cw,
+                additive: false,
+            });
+            return;
+        }
+
+        let Some(drag) = self.selection_drag.as_mut() else {
+            return;
+        };
+
+        if let Some(cw) = current_world {
+            drag.current_world = cw;
         }
     }
 }
@@ -376,6 +483,7 @@ mod test {
                 zoom: 2.0,
             },
             selected: vec![],
+            selection_drag: None,
         };
 
         let batch = InputBatch {
@@ -400,6 +508,7 @@ mod test {
                 zoom: 2.0,
             },
             selected: vec![],
+            selection_drag: None,
         };
 
         let pivot = Vec2::new(300.0, 120.0);

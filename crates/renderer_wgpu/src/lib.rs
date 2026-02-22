@@ -177,7 +177,7 @@ impl Renderer {
                     shader_location: 2,
                 },
                 wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
+                    format: wgpu::VertexFormat::Float32x4,
                     offset: 16,
                     shader_location: 3,
                 },

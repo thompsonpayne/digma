@@ -18,12 +18,16 @@ type InputEvent =
 			pivot_px: Point;
 			zoom_multiplier: number;
 	  }
-	| { type: "pointer_down"; screen_px: Point; shift: boolean };
+	| { type: "pointer_down"; screen_px: Point; shift: boolean; button: number }
+	| { type: "pointer_up"; screen_px: Point; button: number }
+	| { type: "pointer_move"; screen_px: Point; buttons: number }
+	| { type: "pointer_cancel" };
 
 function App() {
 	let canvasRef!: HTMLCanvasElement;
 	let spaceDown = false;
 	let isPanning = false;
+	let isSelecting = false;
 	let lastPt: Point | null = null;
 	let batch: { events: InputEvent[] } | null = null;
 
@@ -71,11 +75,14 @@ function App() {
 				}
 
 				if (e.button === 0 && batch) {
+					isSelecting = true;
+					canvasRef.setPointerCapture(e.pointerId);
 					const rect = canvasRef.getBoundingClientRect();
 					batch.events.push({
 						type: "pointer_down",
 						screen_px: { x: e.clientX - rect.left, y: e.clientY - rect.top },
 						shift: e.shiftKey,
+						button: e.button,
 					});
 				}
 			},
@@ -88,11 +95,23 @@ function App() {
 				if (isPanning && lastPt && batch) {
 					const dx = e.clientX - lastPt.x;
 					const dy = e.clientY - lastPt.y;
+
 					batch.events.push({
 						type: "camera_pan_by_screen_delta",
 						delta_px: { x: dx, y: dy },
 					});
+
 					lastPt = { x: e.clientX, y: e.clientY };
+					return;
+				}
+
+				if (isSelecting && batch) {
+					const rect = canvasRef.getBoundingClientRect();
+					batch.events.push({
+						type: "pointer_move",
+						screen_px: { x: e.clientX - rect.left, y: e.clientY - rect.top },
+						buttons: e.buttons,
+					});
 				}
 			},
 			{ signal: abortController.signal },
@@ -104,7 +123,20 @@ function App() {
 				if (isPanning) {
 					isPanning = false;
 					lastPt = null;
+
 					canvasRef.releasePointerCapture(e.pointerId);
+					return;
+				}
+
+				if (isSelecting && batch) {
+					isSelecting = false;
+					canvasRef.releasePointerCapture(e.pointerId);
+					const rect = canvasRef.getBoundingClientRect();
+					batch.events.push({
+						type: "pointer_up",
+						screen_px: { x: e.clientX - rect.left, y: e.clientY - rect.top },
+						button: e.button,
+					});
 				}
 			},
 			{ signal: abortController.signal },
@@ -117,6 +149,15 @@ function App() {
 					isPanning = false;
 					lastPt = null;
 					canvasRef.releasePointerCapture(e.pointerId);
+					return;
+				}
+
+				if (isSelecting && batch) {
+					isSelecting = false;
+					canvasRef.releasePointerCapture(e.pointerId);
+					batch.events.push({
+						type: "pointer_cancel",
+					});
 				}
 			},
 			{ signal: abortController.signal },
