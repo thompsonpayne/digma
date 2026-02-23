@@ -116,22 +116,6 @@ Notes:
 
 Deliverable: "blank canvas" app that feels smooth.
 
-### Current Progress (as of Feb 22, 2026)
-
-- WebGPU canvas booted on wasm32 via `renderer_wgpu`.
-- Input batching from `web/` to `app_wasm` tick loop.
-- Camera pan/zoom implemented in `engine::Camera`.
-- `RenderScene` struct added and emitted from the engine.
-- Renderer consumes `RenderScene` via instanced drawing (unit quad + instance buffer).
-- Camera uniform wired into WGSL and applied in the vertex shader.
-- `OverlayScene` added in the engine and included in `EngineOutput`.
-- Renderer uploads overlay instances and draws them in a second render pass.
-- `app_wasm` bridges `overlay_scene` into the renderer.
-- Document now stores rect nodes with stable `NodeId`.
-- Hit-testing added for rects in world space.
-- Click-to-select implemented (with shift-toggle).
-- Marquee selection logic implemented (world-space AABB intersection, shift-additive).
-- `OverlayScene` now renders selection outlines/handles from engine selection state.
 
 ### Week 2: Document + Commands + Persistence
 
@@ -201,6 +185,27 @@ Pick 1-2:
 - Text alignment issues: keep overlay container in the same stacking context; use a single source of truth for camera transforms.
 - Export including text: composite canvas + overlay text via an offscreen canvas in JS.
 
+## Current Progress (as of Feb 23, 2026)
+
+- WebGPU canvas booted on wasm32 via `renderer_wgpu`.
+- Input batching from `web/` to `app_wasm` tick loop.
+- Camera pan/zoom implemented in `engine::Camera`.
+- `RenderScene` struct added and emitted from the engine.
+- Renderer consumes `RenderScene` via instanced drawing (unit quad + instance buffer).
+- Camera uniform wired into WGSL and applied in the vertex shader.
+- `OverlayScene` added in the engine and included in `EngineOutput`.
+- Renderer uploads overlay instances and draws them in a second render pass.
+- `app_wasm` bridges `overlay_scene` into the renderer.
+- Document now stores rect nodes with stable `NodeId`.
+- Hit-testing added for rects in world space.
+- Click-to-select implemented (with shift-toggle).
+- Marquee selection logic implemented (world-space AABB intersection, shift-additive).
+- Marquee overlay rendering implemented in `OverlayScene`.
+- Marquee drag now starts only on empty space (no hit), avoiding accidental marquee on top of shapes.
+- Drag threshold added for empty-space marquee initiation (pending marquee state).
+- Click vs drag selection behavior still needs polish when starting on shapes.
+- `OverlayScene` now renders selection outlines/handles from engine selection state.
+
 ## Next Implementation Step
 
-- Wire marquee selection behavior into UI polish: additive drag UX (shift) + clean up selection updates.
+- Implement Move selection (drag to move selected shapes).
