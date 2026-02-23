@@ -116,7 +116,7 @@ Notes:
 
 Deliverable: "blank canvas" app that feels smooth.
 
-### Current Progress (as of Feb 21, 2026)
+### Current Progress (as of Feb 22, 2026)
 
 - WebGPU canvas booted on wasm32 via `renderer_wgpu`.
 - Input batching from `web/` to `app_wasm` tick loop.
@@ -130,6 +130,7 @@ Deliverable: "blank canvas" app that feels smooth.
 - Document now stores rect nodes with stable `NodeId`.
 - Hit-testing added for rects in world space.
 - Click-to-select implemented (with shift-toggle).
+- Marquee selection logic implemented (world-space AABB intersection, shift-additive).
 - `OverlayScene` now renders selection outlines/handles from engine selection state.
 
 ### Week 2: Document + Commands + Persistence
@@ -202,4 +203,4 @@ Pick 1-2:
 
 ## Next Implementation Step
 
-- Add marquee selection (drag to select) and render the marquee box in `OverlayScene`.
+- Wire marquee selection behavior into UI polish: additive drag UX (shift) + clean up selection updates.
