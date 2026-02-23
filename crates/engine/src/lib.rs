@@ -137,6 +137,13 @@ impl Camera {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct PendingMarquee {
+    start_screen_px: Vec2,
+    start_world: Vec2,
+    additive: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct SelectionDrag {
     start_world: Vec2,
@@ -150,6 +157,7 @@ pub struct Engine {
     pub camera: Camera,
     pub selected: Vec<NodeId>,
     pub selection_drag: Option<SelectionDrag>,
+    pub pending_marquee: Option<PendingMarquee>,
 }
 
 impl Engine {
@@ -184,6 +192,7 @@ impl Engine {
             camera: Camera::default(),
             selected: vec![],
             selection_drag: None,
+            pending_marquee: None,
         }
     }
 
@@ -242,6 +251,9 @@ impl Engine {
                 .collect(),
         };
 
+        let drag_threshold_px: f32 = 6.0;
+        let drag_threshold_sq: f32 = drag_threshold_px * drag_threshold_px;
+
         for ev in &batch.events {
             match *ev {
                 InputEvent::CameraPanByScreenDelta { delta_px } => {
@@ -260,8 +272,21 @@ impl Engine {
                 } => {
                     let world = self.camera.screen_to_world(screen_px);
                     let hit = self.check_collide_rects(world);
-                    self.update_marquee(Some(world), Some(world), shift);
 
+                    // reset previous drag state
+                    self.selection_drag = None;
+                    self.pending_marquee = None;
+
+                    // only allow marquee to start from empty space
+                    if hit.is_none() {
+                        self.pending_marquee = Some(PendingMarquee {
+                            start_screen_px: screen_px,
+                            start_world: world,
+                            additive: shift,
+                        });
+                    }
+
+                    self.update_marquee(None, Some(world), false);
                     self.apply_selection(hit, shift);
                 }
                 InputEvent::PointerMove {
@@ -269,18 +294,41 @@ impl Engine {
                     buttons: _buttons,
                 } => {
                     let world = self.camera.screen_to_world(screen_px);
-                    self.update_marquee(None, Some(world), false);
+
+                    if let Some(pending) = self.pending_marquee {
+                        let dx = screen_px.x - pending.start_screen_px.x;
+                        let dy = screen_px.y - pending.start_screen_px.y;
+                        let dist_sq = dx * dx + dy * dy;
+
+                        if dist_sq >= drag_threshold_sq {
+                            self.update_marquee(
+                                Some(pending.start_world),
+                                Some(world),
+                                pending.additive,
+                            );
+                            self.pending_marquee = None; // in selection_drag mode, reset pending
+                        }
+                    } else if self.selection_drag.is_some() {
+                        self.update_marquee(None, Some(world), false);
+                    }
                 }
                 InputEvent::PointerUp {
                     screen_px,
                     button: _button,
                 } => {
                     let world = self.camera.screen_to_world(screen_px);
-                    self.update_marquee(None, Some(world), false);
+
+                    if self.selection_drag.is_some() {
+                        self.update_marquee(None, Some(world), false);
+                    }
+
+                    // reset pending
                     self.selection_drag = None;
+                    self.pending_marquee = None;
                 }
                 InputEvent::PointerCancel => {
                     self.selection_drag = None;
+                    self.pending_marquee = None;
                 }
             }
         }
@@ -467,6 +515,8 @@ pub struct EngineOutput {
 
 #[cfg(test)]
 mod test {
+    use std::collections::btree_set::Difference;
+
     use super::*;
     fn assert_approx(a: f32, b: f32, eps: f32) {
         if (a - b).abs() > eps {
@@ -531,6 +581,7 @@ mod test {
             },
             selected: vec![],
             selection_drag: None,
+            pending_marquee: None,
         };
 
         let batch = InputBatch {
@@ -541,7 +592,7 @@ mod test {
 
         engine.tick(&batch);
 
-        // same expections as the direct Camera test
+        // same expectations as the direct Camera test
         assert_vec2_approx(engine.camera.pan, Vec2::new(-10.0, -5.0), 1e-6);
         assert_approx(engine.camera.zoom, 2.0, 1e-6);
     }
@@ -556,6 +607,7 @@ mod test {
             },
             selected: vec![],
             selection_drag: None,
+            pending_marquee: None,
         };
 
         let pivot = Vec2::new(300.0, 120.0);
