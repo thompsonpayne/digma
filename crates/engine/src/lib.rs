@@ -1,5 +1,7 @@
 mod render_scene;
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 pub use crate::render_scene::{OverlayScene, RectInstance, RenderScene};
@@ -145,19 +147,43 @@ pub struct PendingMarquee {
 }
 
 #[derive(Debug, Clone)]
-pub struct SelectionDrag {
+pub struct MarqueeDrag {
     start_world: Vec2,
     current_world: Vec2,
     additive: bool, // shift key active
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone, Default)]
+pub struct SelectionDrag {
+    start_world: Vec2,
+    current_world: Vec2,
+
+    // snapshot to avoid cumulative drift
+    origins: Vec<(NodeId, Vec2)>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PendingSelectionMove {
+    start_screen_x: Vec2,
+    start_world: Vec2,
+}
+
+#[derive(Debug)]
+pub enum DragState {
+    Idle,
+    PendingMarquee(PendingMarquee),
+    Marquee(MarqueeDrag),
+    PendingSelectionMove(PendingSelectionMove),
+    SelectionMove(SelectionDrag),
+}
+
+#[derive(Debug)]
 pub struct Engine {
     pub doc: Document,
     pub camera: Camera,
     pub selected: Vec<NodeId>,
-    pub selection_drag: Option<SelectionDrag>,
-    pub pending_marquee: Option<PendingMarquee>,
+
+    pub drag_state: DragState,
 }
 
 impl Engine {
@@ -191,8 +217,18 @@ impl Engine {
             doc,
             camera: Camera::default(),
             selected: vec![],
-            selection_drag: None,
-            pending_marquee: None,
+            drag_state: DragState::Idle,
+        }
+    }
+
+    fn move_selected_by(&mut self, delta: Vec2) {
+        let selected: HashSet<NodeId> = self.selected.iter().copied().collect();
+
+        for rect in self.doc.rects.iter_mut() {
+            if selected.contains(&rect.id) {
+                rect.pos.x += delta.x;
+                rect.pos.y += delta.y;
+            }
         }
     }
 
@@ -237,6 +273,9 @@ impl Engine {
         }
     }
 
+    /// # Arguments
+    ///
+    /// * `batch` receive list of input events [InputEvent]
     pub fn tick(&mut self, batch: &InputBatch) -> EngineOutput {
         let render_scene = render_scene::RenderScene {
             rects: self
@@ -274,12 +313,11 @@ impl Engine {
                     let hit = self.check_collide_rects(world);
 
                     // reset previous drag state
-                    self.selection_drag = None;
-                    self.pending_marquee = None;
+                    self.drag_state = DragState::Idle;
 
                     // only allow marquee to start from empty space
                     if hit.is_none() {
-                        self.pending_marquee = Some(PendingMarquee {
+                        self.drag_state = DragState::PendingMarquee(PendingMarquee {
                             start_screen_px: screen_px,
                             start_world: world,
                             additive: shift,
@@ -295,21 +333,29 @@ impl Engine {
                 } => {
                     let world = self.camera.screen_to_world(screen_px);
 
-                    if let Some(pending) = self.pending_marquee {
-                        let dx = screen_px.x - pending.start_screen_px.x;
-                        let dy = screen_px.y - pending.start_screen_px.y;
-                        let dist_sq = dx * dx + dy * dy;
+                    match &self.drag_state {
+                        DragState::Idle => {}
+                        DragState::PendingMarquee(pending) => {
+                            let dx = screen_px.x - pending.start_screen_px.x;
+                            let dy = screen_px.y - pending.start_screen_px.y;
+                            let dist_sq = dx * dx + dy * dy;
 
-                        if dist_sq >= drag_threshold_sq {
-                            self.update_marquee(
-                                Some(pending.start_world),
-                                Some(world),
-                                pending.additive,
-                            );
-                            self.pending_marquee = None; // in selection_drag mode, reset pending
+                            if dist_sq >= drag_threshold_sq {
+                                self.update_marquee(
+                                    Some(pending.start_world),
+                                    Some(world),
+                                    pending.additive,
+                                );
+                                self.drag_state = DragState::Idle; // in selection_drag mode, reset pending
+                            }
                         }
-                    } else if self.selection_drag.is_some() {
-                        self.update_marquee(None, Some(world), false);
+                        DragState::Marquee(_) => {
+                            self.update_marquee(None, Some(world), false);
+                        }
+                        DragState::PendingSelectionMove(pending_move) => {
+                            _ = pending_move;
+                        }
+                        DragState::SelectionMove(selection_drag) => todo!(),
                     }
                 }
                 InputEvent::PointerUp {
@@ -318,17 +364,15 @@ impl Engine {
                 } => {
                     let world = self.camera.screen_to_world(screen_px);
 
-                    if self.selection_drag.is_some() {
+                    if let DragState::Marquee(_) = self.drag_state {
                         self.update_marquee(None, Some(world), false);
                     }
 
                     // reset pending
-                    self.selection_drag = None;
-                    self.pending_marquee = None;
+                    self.drag_state = DragState::Idle;
                 }
                 InputEvent::PointerCancel => {
-                    self.selection_drag = None;
-                    self.pending_marquee = None;
+                    self.drag_state = DragState::Idle;
                 }
             }
         }
@@ -402,7 +446,7 @@ impl Engine {
             });
         }
 
-        if let Some(drag) = &self.selection_drag {
+        if let DragState::Marquee(drag) = &self.drag_state {
             let min_x = drag.start_world.x.min(drag.current_world.x);
             let min_y = drag.start_world.y.min(drag.current_world.y);
             let max_x = drag.start_world.x.max(drag.current_world.x);
@@ -459,7 +503,7 @@ impl Engine {
     ) {
         if let Some(sw) = start_world {
             let cw = current_world.unwrap_or(sw);
-            self.selection_drag = Some(SelectionDrag {
+            self.drag_state = DragState::Marquee(MarqueeDrag {
                 start_world: sw,
                 current_world: cw,
                 additive,
@@ -467,7 +511,7 @@ impl Engine {
             return;
         }
 
-        let Some(drag) = self.selection_drag.as_mut() else {
+        let DragState::Marquee(drag) = &mut self.drag_state else {
             return;
         };
 
@@ -515,7 +559,6 @@ pub struct EngineOutput {
 
 #[cfg(test)]
 mod test {
-    use std::collections::btree_set::Difference;
 
     use super::*;
     fn assert_approx(a: f32, b: f32, eps: f32) {
@@ -580,8 +623,7 @@ mod test {
                 zoom: 2.0,
             },
             selected: vec![],
-            selection_drag: None,
-            pending_marquee: None,
+            drag_state: DragState::Idle,
         };
 
         let batch = InputBatch {
@@ -606,8 +648,7 @@ mod test {
                 zoom: 2.0,
             },
             selected: vec![],
-            selection_drag: None,
-            pending_marquee: None,
+            drag_state: DragState::Idle,
         };
 
         let pivot = Vec2::new(300.0, 120.0);
