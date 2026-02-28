@@ -164,7 +164,7 @@ pub struct SelectionDrag {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PendingSelectionMove {
-    start_screen_x: Vec2,
+    start_screen_px: Vec2,
     start_world: Vec2,
 }
 
@@ -218,17 +218,6 @@ impl Engine {
             camera: Camera::default(),
             selected: vec![],
             drag_state: DragState::Idle,
-        }
-    }
-
-    fn move_selected_by(&mut self, delta: Vec2) {
-        let selected: HashSet<NodeId> = self.selected.iter().copied().collect();
-
-        for rect in self.doc.rects.iter_mut() {
-            if selected.contains(&rect.id) {
-                rect.pos.x += delta.x;
-                rect.pos.y += delta.y;
-            }
         }
     }
 
@@ -312,26 +301,36 @@ impl Engine {
                     let world = self.camera.screen_to_world(screen_px);
                     let hit = self.check_collide_rects(world);
 
-                    // reset previous drag state
-                    self.drag_state = DragState::Idle;
+                    self.drag_state = if let Some(hit_id) = hit {
+                        let hit_was_selected = self.selected.contains(&hit_id);
+                        self.apply_selection(Some(hit_id), shift);
 
-                    // only allow marquee to start from empty space
-                    if hit.is_none() {
-                        self.drag_state = DragState::PendingMarquee(PendingMarquee {
+                        if hit_was_selected && !shift {
+                            DragState::PendingSelectionMove(PendingSelectionMove {
+                                start_screen_px: screen_px,
+                                start_world: world,
+                            })
+                        } else {
+                            DragState::Idle
+                        }
+                    } else {
+                        self.apply_selection(None, shift);
+                        DragState::PendingMarquee(PendingMarquee {
                             start_screen_px: screen_px,
                             start_world: world,
                             additive: shift,
-                        });
-                    }
-
-                    self.update_marquee(None, Some(world), false);
-                    self.apply_selection(hit, shift);
+                        })
+                    };
                 }
                 InputEvent::PointerMove {
                     screen_px,
                     buttons: _buttons,
                 } => {
                     let world = self.camera.screen_to_world(screen_px);
+                    let mut start_marquee: Option<PendingMarquee> = None;
+                    let mut start_move: Option<PendingSelectionMove> = None;
+                    let mut continue_marquee = false;
+                    let mut continue_move = false;
 
                     match &self.drag_state {
                         DragState::Idle => {}
@@ -341,21 +340,67 @@ impl Engine {
                             let dist_sq = dx * dx + dy * dy;
 
                             if dist_sq >= drag_threshold_sq {
-                                self.update_marquee(
-                                    Some(pending.start_world),
-                                    Some(world),
-                                    pending.additive,
-                                );
-                                self.drag_state = DragState::Idle; // in selection_drag mode, reset pending
+                                start_marquee = Some(*pending);
                             }
                         }
                         DragState::Marquee(_) => {
-                            self.update_marquee(None, Some(world), false);
+                            continue_marquee = true;
                         }
-                        DragState::PendingSelectionMove(pending_move) => {
-                            _ = pending_move;
+                        DragState::PendingSelectionMove(pending) => {
+                            let dx = screen_px.x - pending.start_screen_px.x;
+                            let dy = screen_px.y - pending.start_screen_px.y;
+                            let dist_sq = dx * dx + dy * dy;
+
+                            if dist_sq >= drag_threshold_sq {
+                                start_move = Some(*pending);
+                            }
                         }
-                        DragState::SelectionMove(selection_drag) => todo!(),
+                        DragState::SelectionMove(_) => {
+                            continue_move = true;
+                        }
+                    }
+
+                    if let Some(pending) = start_marquee {
+                        self.drag_state = DragState::Marquee(MarqueeDrag {
+                            start_world: pending.start_world,
+                            current_world: world,
+                            additive: pending.additive,
+                        }); // in selection_drag mode, reset pending
+
+                        self.update_marquee(
+                            Some(pending.start_world),
+                            Some(world),
+                            pending.additive,
+                        );
+                    } else if continue_marquee {
+                        self.update_marquee(None, Some(world), false);
+                    }
+
+                    if let Some(pending) = start_move {
+                        let origins: Vec<(NodeId, Vec2)> = self
+                            .selected
+                            .iter()
+                            .filter_map(|id| {
+                                self.doc
+                                    .rects
+                                    .iter()
+                                    .find(|r| r.id == *id)
+                                    .map(|r| (*id, r.pos))
+                            })
+                            .collect();
+
+                        self.drag_state = DragState::SelectionMove(SelectionDrag {
+                            start_world: pending.start_world,
+                            current_world: world,
+                            origins,
+                        });
+
+                        self.apply_selection_drag();
+                    } else if continue_move {
+                        if let DragState::SelectionMove(drag) = &mut self.drag_state {
+                            drag.current_world = world;
+                        }
+                        self.apply_selection_drag();
                     }
                 }
                 InputEvent::PointerUp {
@@ -547,6 +592,25 @@ impl Engine {
         }
 
         self.selected = selected;
+    }
+
+    fn apply_selection_drag(&mut self) {
+        let (start_world, current_world, origins) = match &self.drag_state {
+            DragState::SelectionMove(drag) => {
+                (drag.start_world, drag.current_world, drag.origins.clone())
+            }
+            _ => return,
+        };
+
+        let dx = current_world.x - start_world.x;
+        let dy = current_world.y - start_world.y;
+
+        for (id, origin) in origins {
+            if let Some(rect) = self.doc.rects.iter_mut().find(|r| r.id == id) {
+                rect.pos.x = origin.x + dx;
+                rect.pos.y = origin.y + dy;
+            }
+        }
     }
 }
 
