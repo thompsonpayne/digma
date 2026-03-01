@@ -1,7 +1,5 @@
 mod render_scene;
 
-use std::collections::HashSet;
-
 use serde::{Deserialize, Serialize};
 
 pub use crate::render_scene::{OverlayScene, RectInstance, RenderScene};
@@ -303,7 +301,7 @@ impl Engine {
 
                     self.drag_state = if let Some(hit_id) = hit {
                         let hit_was_selected = self.selected.contains(&hit_id);
-                        self.apply_selection(Some(hit_id), shift);
+                        // self.apply_selection(Some(hit_id), shift);
 
                         if hit_was_selected && !shift {
                             DragState::PendingSelectionMove(PendingSelectionMove {
@@ -311,6 +309,7 @@ impl Engine {
                                 start_world: world,
                             })
                         } else {
+                            self.apply_selection(Some(hit_id), shift);
                             DragState::Idle
                         }
                     } else {
@@ -409,7 +408,7 @@ impl Engine {
                 } => {
                     let world = self.camera.screen_to_world(screen_px);
 
-                    if let DragState::Marquee(_) = self.drag_state {
+                    if matches!(self.drag_state, DragState::Marquee(_)) {
                         self.update_marquee(None, Some(world), false);
                     }
 
@@ -594,6 +593,7 @@ impl Engine {
         self.selected = selected;
     }
 
+    /// Update rects position in [Document] when  DragState  is [DragState::SelectionMove]
     fn apply_selection_drag(&mut self) {
         let (start_world, current_world, origins) = match &self.drag_state {
             DragState::SelectionMove(drag) => {
