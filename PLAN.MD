@@ -185,7 +185,7 @@ Pick 1-2:
 - Text alignment issues: keep overlay container in the same stacking context; use a single source of truth for camera transforms.
 - Export including text: composite canvas + overlay text via an offscreen canvas in JS.
 
-## Current Progress (as of Feb 23, 2026)
+## Current Progress (as of Mar 2, 2026)
 
 - WebGPU canvas booted on wasm32 via `renderer_wgpu`.
 - Input batching from `web/` to `app_wasm` tick loop.
@@ -203,9 +203,14 @@ Pick 1-2:
 - Marquee overlay rendering implemented in `OverlayScene`.
 - Marquee drag now starts only on empty space (no hit), avoiding accidental marquee on top of shapes.
 - Drag threshold added for empty-space marquee initiation (pending marquee state).
-- Click vs drag selection behavior still needs polish when starting on shapes.
 - `OverlayScene` now renders selection outlines/handles from engine selection state.
+- Drag interactions refactored to a unified engine drag state machine (`DragState`): `Idle`, `PendingMarquee`, `Marquee`, `PendingSelectionMove`, `SelectionMove`.
+- Move-selection path implemented with drag threshold and world-space delta.
+- Selection move uses an origin snapshot (`Vec<(NodeId, Vec2)>`) to avoid cumulative drift while dragging.
+- Clicking an already-selected shape (without shift) now preserves the multi-selection and starts pending move.
+- Shift remains selection-modifier behavior (toggle/additive), not move-start behavior.
 
 ## Next Implementation Step
 
-- Implement Move selection (drag to move selected shapes).
+- Add/adjust tests for selection move behavior (single and multi-selection drag).
+- Implement resize handles (scale transform from overlay handles).

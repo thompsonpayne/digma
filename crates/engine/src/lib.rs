@@ -1,5 +1,7 @@
 mod render_scene;
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 pub use crate::render_scene::{OverlayScene, RectInstance, RenderScene};
@@ -156,8 +158,8 @@ pub struct SelectionDrag {
     start_world: Vec2,
     current_world: Vec2,
 
-    // snapshot to avoid cumulative drift
-    origins: Vec<(NodeId, Vec2)>,
+    // Snapshot selected rect index + original position to avoid cumulative drift
+    origins: Vec<(usize, Vec2)>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -301,7 +303,6 @@ impl Engine {
 
                     self.drag_state = if let Some(hit_id) = hit {
                         let hit_was_selected = self.selected.contains(&hit_id);
-                        // self.apply_selection(Some(hit_id), shift);
 
                         if hit_was_selected && !shift {
                             DragState::PendingSelectionMove(PendingSelectionMove {
@@ -376,15 +377,16 @@ impl Engine {
                     }
 
                     if let Some(pending) = start_move {
-                        let origins: Vec<(NodeId, Vec2)> = self
-                            .selected
+                        let selected_ids: HashSet<NodeId> = self.selected.iter().copied().collect();
+                        let origins: Vec<(usize, Vec2)> = self
+                            .doc
+                            .rects
                             .iter()
-                            .filter_map(|id| {
-                                self.doc
-                                    .rects
-                                    .iter()
-                                    .find(|r| r.id == *id)
-                                    .map(|r| (*id, r.pos))
+                            .enumerate()
+                            .filter_map(|(idx, rect)| {
+                                selected_ids
+                                    .contains(&(*rect).id)
+                                    .then_some((idx, rect.pos))
                             })
                             .collect();
 
@@ -595,18 +597,16 @@ impl Engine {
 
     /// Update rects position in [Document] when  DragState  is [DragState::SelectionMove]
     fn apply_selection_drag(&mut self) {
-        let (start_world, current_world, origins) = match &self.drag_state {
-            DragState::SelectionMove(drag) => {
-                (drag.start_world, drag.current_world, drag.origins.clone())
-            }
+        let drag = match &self.drag_state {
+            DragState::SelectionMove(drag) => drag,
             _ => return,
         };
 
-        let dx = current_world.x - start_world.x;
-        let dy = current_world.y - start_world.y;
+        let dx = drag.current_world.x - drag.start_world.x;
+        let dy = drag.current_world.y - drag.start_world.y;
 
-        for (id, origin) in origins {
-            if let Some(rect) = self.doc.rects.iter_mut().find(|r| r.id == id) {
+        for (idx, origin) in &drag.origins {
+            if let Some(rect) = self.doc.rects.get_mut(*idx) {
                 rect.pos.x = origin.x + dx;
                 rect.pos.y = origin.y + dy;
             }
