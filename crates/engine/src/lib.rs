@@ -168,13 +168,51 @@ pub struct PendingSelectionMove {
     start_world: Vec2,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Corner {
+    TL,
+    TR,
+    BL,
+    BR,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct HandleHit {
+    pub node_id: NodeId,
+    pub corner: Corner,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PendingResize {
+    pub handle: HandleHit,
+    pub start_screen_px: Vec2,
+    pub start_world: Vec2,
+}
+
+#[derive(Debug)]
+pub struct ResizeDrag {
+    pub handle: HandleHit,
+    pub start_world: Vec2,
+    pub current_world: Vec2,
+
+    // origin snapshot - pos and size at drag start (no drift)
+    pub origin_pos: Vec2,
+    pub origin_size: Vec2,
+    pub rect_idx: usize,
+}
+
 #[derive(Debug)]
 pub enum DragState {
     Idle,
+
     PendingMarquee(PendingMarquee),
     Marquee(MarqueeDrag),
+
     PendingSelectionMove(PendingSelectionMove),
     SelectionMove(SelectionDrag),
+
+    PendingResize(PendingResize),
+    Resize(ResizeDrag),
 }
 
 #[derive(Debug)]
@@ -299,6 +337,17 @@ impl Engine {
                     button: _,
                 } => {
                     let world = self.camera.screen_to_world(screen_px);
+
+                    // Handle hit takes priority over rect selection
+                    if let Some(handle_hit) = self.check_collide_handle(world) {
+                        self.drag_state = DragState::PendingResize(PendingResize {
+                            handle: handle_hit,
+                            start_screen_px: screen_px,
+                            start_world: world,
+                        });
+                        continue;
+                    }
+
                     let hit = self.check_collide_rects(world);
 
                     self.drag_state = if let Some(hit_id) = hit {
@@ -329,8 +378,10 @@ impl Engine {
                     let world = self.camera.screen_to_world(screen_px);
                     let mut start_marquee: Option<PendingMarquee> = None;
                     let mut start_move: Option<PendingSelectionMove> = None;
+                    let mut start_resize: Option<PendingResize> = None;
                     let mut continue_marquee = false;
                     let mut continue_move = false;
+                    let mut continue_resize = false;
 
                     match &self.drag_state {
                         DragState::Idle => {}
@@ -358,6 +409,45 @@ impl Engine {
                         DragState::SelectionMove(_) => {
                             continue_move = true;
                         }
+                        DragState::PendingResize(pending) => {
+                            let dx = screen_px.x - pending.start_screen_px.x;
+                            let dy = screen_px.y - pending.start_screen_px.y;
+                            let dist_sq = dx * dx + dy * dy;
+
+                            if dist_sq >= drag_threshold_sq {
+                                start_resize = Some(*pending);
+                            }
+                        }
+                        DragState::Resize(_) => {
+                            continue_resize = true;
+                        }
+                    }
+
+                    if let Some(pending) = start_resize {
+                        let rect_idx = self
+                            .doc
+                            .rects
+                            .iter()
+                            .position(|r| r.id == pending.handle.node_id)
+                            .unwrap();
+
+                        let rect = &self.doc.rects[rect_idx];
+
+                        self.drag_state = DragState::Resize(ResizeDrag {
+                            handle: pending.handle,
+                            start_world: pending.start_world,
+                            current_world: world,
+                            origin_pos: rect.pos,   // snapshot
+                            origin_size: rect.size, // snapshot
+                            rect_idx,
+                        });
+
+                        self.apply_selection_resize()
+                    } else if continue_resize {
+                        if let DragState::Resize(drag) = &mut self.drag_state {
+                            drag.current_world = world;
+                        }
+                        self.apply_selection_resize();
                     }
 
                     if let Some(pending) = start_marquee {
@@ -430,6 +520,43 @@ impl Engine {
             render_scene,
             overlay_scene,
         }
+    }
+
+    /// Returns the handle hit if `world` is within grab distance of any
+    /// corner handle of the single selected rect. Returns `None` if
+    /// nothing is selected, more than one rect is selected, or the point
+    /// misses all handles.
+    fn check_collide_handle(&self, world: Vec2) -> Option<HandleHit> {
+        // Only active for single selection
+        if self.selected.len() != 1 {
+            return None;
+        }
+
+        let id = self.selected[0];
+        let rect = self.doc.rects.iter().find(|r| r.id == id)?;
+        let (x, y, w, h) = (rect.pos.x, rect.pos.y, rect.size.x, rect.size.y);
+
+        // hit radius in world units (slightly larger than visual handle - which is 8px [handle_px] in [init_overlay_scene])
+        let hit_px = 12.0_f32;
+        let hit_r = hit_px / self.camera.zoom;
+
+        let corners = [
+            (Vec2::new(x, y), Corner::TL),
+            (Vec2::new(x + w, y), Corner::TR),
+            (Vec2::new(x, y + h), Corner::BL),
+            (Vec2::new(x + w, y + h), Corner::BR),
+        ];
+
+        for (center, corner) in corners {
+            if (world.x - center.x).abs() <= hit_r && (world.y - center.y).abs() <= hit_r {
+                return Some(HandleHit {
+                    node_id: id,
+                    corner,
+                });
+            }
+        }
+
+        None
     }
 
     fn init_overlay_scene(&self) -> OverlayScene {
@@ -609,6 +736,104 @@ impl Engine {
             if let Some(rect) = self.doc.rects.get_mut(*idx) {
                 rect.pos.x = origin.x + dx;
                 rect.pos.y = origin.y + dy;
+            }
+        }
+    }
+
+    fn apply_selection_resize(&mut self) {
+        let DragState::Resize(drag) = &self.drag_state else {
+            return;
+        };
+        let min_size = 1.0_f32;
+
+        let dx = drag.current_world.x - drag.start_world.x;
+        let dy = drag.current_world.y - drag.start_world.y;
+
+        if let Some(rect) = self.doc.rects.get_mut(drag.rect_idx) {
+            match drag.handle.corner {
+                Corner::TL => {
+                    // dx
+                    let mut new_size_x: f32;
+                    let mut new_pos_x: f32;
+
+                    new_pos_x = drag.origin_pos.x + dx;
+                    new_size_x = drag.origin_size.x - dx;
+
+                    if new_size_x < min_size {
+                        new_size_x = min_size;
+                        new_pos_x = drag.origin_pos.x + drag.origin_size.x - min_size
+                        // pin right edge
+                    }
+
+                    rect.pos.x = new_pos_x;
+                    rect.size.x = new_size_x;
+
+                    // dy
+                    let mut new_size_y: f32;
+                    let mut new_pos_y: f32;
+
+                    new_pos_y = drag.origin_pos.y + dy;
+                    new_size_y = drag.origin_size.y - dy;
+
+                    if new_size_y < min_size {
+                        new_size_y = min_size;
+                        new_pos_y = drag.origin_pos.y + drag.origin_size.y - min_size
+                        // pin bottom edge
+                    }
+
+                    rect.pos.y = new_pos_y;
+                    rect.size.y = new_size_y;
+                }
+                Corner::TR => {
+                    // x: right edge moves — pos.x fixed, size.x grows/shrinks
+                    let mut new_size_x = drag.origin_size.x + dx;
+                    if new_size_x < min_size {
+                        new_size_x = min_size;
+                    }
+                    rect.size.x = new_size_x;
+
+                    // y: top edge moves — anchor is bottom edge
+                    let mut new_pos_y = drag.origin_pos.y + dy;
+                    let mut new_size_y = drag.origin_size.y - dy;
+                    if new_size_y < min_size {
+                        new_size_y = min_size;
+                        new_pos_y = drag.origin_pos.y + drag.origin_size.y - min_size;
+                    }
+                    rect.pos.y = new_pos_y;
+                    rect.size.y = new_size_y;
+                }
+                Corner::BL => {
+                    // x: left edge moves — anchor is right edge
+                    let mut new_pos_x = drag.origin_pos.x + dx;
+                    let mut new_size_x = drag.origin_size.x - dx;
+                    if new_size_x < min_size {
+                        new_size_x = min_size;
+                        new_pos_x = drag.origin_pos.x + drag.origin_size.x - min_size;
+                    }
+                    rect.pos.x = new_pos_x;
+                    rect.size.x = new_size_x;
+
+                    // y: bottom edge moves — pos.y fixed, size.y grows/shrinks
+                    let mut new_size_y = drag.origin_size.y + dy;
+                    if new_size_y < min_size {
+                        new_size_y = min_size;
+                    }
+                    rect.size.y = new_size_y;
+                }
+                Corner::BR => {
+                    // Both right and bottom edges move — pos unchanged, only size changes
+                    let mut new_size_x = drag.origin_size.x + dx;
+                    if new_size_x < min_size {
+                        new_size_x = min_size;
+                    }
+                    rect.size.x = new_size_x;
+
+                    let mut new_size_y = drag.origin_size.y + dy;
+                    if new_size_y < min_size {
+                        new_size_y = min_size;
+                    }
+                    rect.size.y = new_size_y;
+                }
             }
         }
     }
