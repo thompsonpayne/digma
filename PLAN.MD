@@ -185,7 +185,7 @@ Pick 1-2:
 - Text alignment issues: keep overlay container in the same stacking context; use a single source of truth for camera transforms.
 - Export including text: composite canvas + overlay text via an offscreen canvas in JS.
 
-## Current Progress (as of Mar 2, 2026)
+## Current Progress (as of Mar 4, 2026)
 
 - WebGPU canvas booted on wasm32 via `renderer_wgpu`.
 - Input batching from `web/` to `app_wasm` tick loop.
@@ -209,8 +209,8 @@ Pick 1-2:
 - Selection move uses an origin snapshot (`Vec<(NodeId, Vec2)>`) to avoid cumulative drift while dragging.
 - Clicking an already-selected shape (without shift) now preserves the multi-selection and starts pending move.
 - Shift remains selection-modifier behavior (toggle/additive), not move-start behavior.
+- Tests added for selection move behavior: single-drag (full flow, below-threshold no-op, cancel), multi-drag (all selected move by same delta, unselected rect untouched, no cumulative drift).
 
 ## Next Implementation Step
 
-- Add/adjust tests for selection move behavior (single and multi-selection drag).
 - Implement resize handles (scale transform from overlay handles).

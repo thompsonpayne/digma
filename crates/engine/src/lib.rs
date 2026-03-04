@@ -783,4 +783,353 @@ mod test {
         engine.apply_selection(None, false);
         assert!(engine.selected.is_empty());
     }
+
+    /// Helper: build a minimal Engine with a single 100x100 rect at (50, 50).
+    fn engine_with_one_rect() -> Engine {
+        let mut doc = Document::new();
+        let id = doc.alloc_id();
+        doc.rects.push(RectNode {
+            id,
+            pos: Vec2::new(50.0, 50.0),
+            size: Vec2::new(100.0, 100.0),
+            color: [1.0, 0.0, 0.0, 1.0],
+        });
+        Engine {
+            doc,
+            camera: Camera::default(),
+            selected: vec![],
+            drag_state: DragState::Idle,
+        }
+    }
+
+    /// Helper: build a minimal Engine with two non-overlapping 100x100 rects.
+    fn engine_with_two_rects() -> Engine {
+        let mut doc = Document::new();
+        let id0 = doc.alloc_id();
+        let id1 = doc.alloc_id();
+        doc.rects.push(RectNode {
+            id: id0,
+            pos: Vec2::new(50.0, 50.0),
+            size: Vec2::new(100.0, 100.0),
+            color: [1.0, 0.0, 0.0, 1.0],
+        });
+        doc.rects.push(RectNode {
+            id: id1,
+            pos: Vec2::new(300.0, 50.0),
+            size: Vec2::new(100.0, 100.0),
+            color: [0.0, 0.0, 1.0, 1.0],
+        });
+        Engine {
+            doc,
+            camera: Camera::default(),
+            selected: vec![],
+            drag_state: DragState::Idle,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Selection move — single selection
+    // -----------------------------------------------------------------------
+
+    /// Clicking a rect selects it (PendingSelectionMove after PointerDown on
+    /// an already-selected rect). Moving beyond the drag threshold actually
+    /// moves the rect. PointerUp finalises the position.
+    #[test]
+    fn single_selection_drag_moves_rect() {
+        let mut engine = engine_with_one_rect();
+        let id = engine.doc.rects[0].id;
+        let origin = engine.doc.rects[0].pos;
+
+        // First click: select the rect (hit on unselected → apply_selection, stays Idle).
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0), // inside rect (50..150, 50..150)
+                shift: false,
+                button: 0,
+            }],
+        });
+        assert_eq!(engine.selected, vec![id]);
+
+        // Second click on the now-selected rect → PendingSelectionMove.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0),
+                shift: false,
+                button: 0,
+            }],
+        });
+        assert!(matches!(
+            engine.drag_state,
+            DragState::PendingSelectionMove(_)
+        ));
+
+        // Move beyond 6 px threshold → SelectionMove + rect displaced.
+        // World == screen at zoom=1, pan=(0,0).  Delta in world = (30, 20).
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerMove {
+                screen_px: Vec2::new(130.0, 120.0),
+                buttons: 1,
+            }],
+        });
+        assert!(matches!(engine.drag_state, DragState::SelectionMove(_)));
+        let pos_mid = engine.doc.rects[0].pos;
+        assert_vec2_approx(pos_mid, Vec2::new(origin.x + 30.0, origin.y + 20.0), 1e-4);
+
+        // Continue dragging further.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerMove {
+                screen_px: Vec2::new(160.0, 150.0),
+                buttons: 1,
+            }],
+        });
+        let pos_far = engine.doc.rects[0].pos;
+        assert_vec2_approx(pos_far, Vec2::new(origin.x + 60.0, origin.y + 50.0), 1e-4);
+
+        // Release pointer → Idle, position retained.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerUp {
+                screen_px: Vec2::new(160.0, 150.0),
+                button: 0,
+            }],
+        });
+        assert!(matches!(engine.drag_state, DragState::Idle));
+        assert_vec2_approx(engine.doc.rects[0].pos, pos_far, 1e-4);
+    }
+
+    /// A move below the 6 px drag threshold must NOT start SelectionMove and
+    /// must NOT displace the rect.
+    #[test]
+    fn single_selection_drag_below_threshold_does_not_move_rect() {
+        let mut engine = engine_with_one_rect();
+        let id = engine.doc.rects[0].id;
+        let origin = engine.doc.rects[0].pos;
+
+        // Select then enter PendingSelectionMove.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0),
+                shift: false,
+                button: 0,
+            }],
+        });
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0),
+                shift: false,
+                button: 0,
+            }],
+        });
+        assert!(matches!(
+            engine.drag_state,
+            DragState::PendingSelectionMove(_)
+        ));
+        assert_eq!(engine.selected, vec![id]);
+
+        // Move only 3 px — below 6 px threshold.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerMove {
+                screen_px: Vec2::new(103.0, 100.0),
+                buttons: 1,
+            }],
+        });
+        // Should still be pending, not moved.
+        assert!(matches!(
+            engine.drag_state,
+            DragState::PendingSelectionMove(_)
+        ));
+        assert_vec2_approx(engine.doc.rects[0].pos, origin, 1e-4);
+    }
+
+    /// Cancelling a drag mid-flight must stop the move (state → Idle) but the
+    /// rect keeps its last displaced position (no automatic rollback).
+    #[test]
+    fn single_selection_drag_cancel_stops_move() {
+        let mut engine = engine_with_one_rect();
+        let origin = engine.doc.rects[0].pos;
+
+        // Select.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0),
+                shift: false,
+                button: 0,
+            }],
+        });
+        // Enter PendingSelectionMove.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0),
+                shift: false,
+                button: 0,
+            }],
+        });
+        // Start move.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerMove {
+                screen_px: Vec2::new(150.0, 100.0),
+                buttons: 1,
+            }],
+        });
+        assert!(matches!(engine.drag_state, DragState::SelectionMove(_)));
+        let pos_after_move = engine.doc.rects[0].pos;
+        assert_vec2_approx(pos_after_move, Vec2::new(origin.x + 50.0, origin.y), 1e-4);
+
+        // Cancel.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerCancel],
+        });
+        assert!(matches!(engine.drag_state, DragState::Idle));
+        // Position is retained at last moved location (no rollback in the engine).
+        assert_vec2_approx(engine.doc.rects[0].pos, pos_after_move, 1e-4);
+    }
+
+    // -----------------------------------------------------------------------
+    // Selection move — multi-selection
+    // -----------------------------------------------------------------------
+
+    /// Dragging one of multiple selected rects moves ALL of them by the same
+    /// world-space delta, preserving their relative positions.
+    #[test]
+    fn multi_selection_drag_moves_all_selected_rects() {
+        let mut engine = engine_with_two_rects();
+        let id0 = engine.doc.rects[0].id;
+        let id1 = engine.doc.rects[1].id;
+        let origin0 = engine.doc.rects[0].pos;
+        let origin1 = engine.doc.rects[1].pos;
+
+        // Select rect 0.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0), // inside rect 0
+                shift: false,
+                button: 0,
+            }],
+        });
+        // Add rect 1 to selection with shift-click.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(350.0, 100.0), // inside rect 1
+                shift: true,
+                button: 0,
+            }],
+        });
+        assert!(engine.selected.contains(&id0));
+        assert!(engine.selected.contains(&id1));
+
+        // Click on rect 0 again (already selected, no shift) → PendingSelectionMove.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0),
+                shift: false,
+                button: 0,
+            }],
+        });
+        assert!(matches!(
+            engine.drag_state,
+            DragState::PendingSelectionMove(_)
+        ));
+
+        // Drag beyond threshold (dx=40, dy=25 world units at zoom=1).
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerMove {
+                screen_px: Vec2::new(140.0, 125.0),
+                buttons: 1,
+            }],
+        });
+        assert!(matches!(engine.drag_state, DragState::SelectionMove(_)));
+
+        let pos0 = engine.doc.rects[0].pos;
+        let pos1 = engine.doc.rects[1].pos;
+        assert_vec2_approx(pos0, Vec2::new(origin0.x + 40.0, origin0.y + 25.0), 1e-4);
+        assert_vec2_approx(pos1, Vec2::new(origin1.x + 40.0, origin1.y + 25.0), 1e-4);
+
+        // Release.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerUp {
+                screen_px: Vec2::new(140.0, 125.0),
+                button: 0,
+            }],
+        });
+        assert!(matches!(engine.drag_state, DragState::Idle));
+        // Positions retained.
+        assert_vec2_approx(engine.doc.rects[0].pos, pos0, 1e-4);
+        assert_vec2_approx(engine.doc.rects[1].pos, pos1, 1e-4);
+    }
+
+    /// Only selected rects are moved; unselected rects remain in place.
+    #[test]
+    fn multi_selection_drag_does_not_move_unselected_rect() {
+        let mut engine = engine_with_two_rects();
+        let origin1 = engine.doc.rects[1].pos;
+
+        // Select only rect 0.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0),
+                shift: false,
+                button: 0,
+            }],
+        });
+        // Enter PendingSelectionMove on rect 0.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0),
+                shift: false,
+                button: 0,
+            }],
+        });
+        // Drag.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerMove {
+                screen_px: Vec2::new(150.0, 100.0),
+                buttons: 1,
+            }],
+        });
+
+        // Rect 1 (unselected) must not have moved.
+        assert_vec2_approx(engine.doc.rects[1].pos, origin1, 1e-4);
+    }
+
+    /// Dragging preserves no cumulative drift across multiple sequential move
+    /// events: the final position equals origin + total_delta, not a sum of
+    /// per-frame deltas applied on top of each other.
+    #[test]
+    fn selection_drag_no_cumulative_drift() {
+        let mut engine = engine_with_one_rect();
+        let origin = engine.doc.rects[0].pos;
+
+        // Select.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0),
+                shift: false,
+                button: 0,
+            }],
+        });
+        // PendingSelectionMove.
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0),
+                shift: false,
+                button: 0,
+            }],
+        });
+
+        // Many small moves — each frame advances 1 px.
+        for i in 1..=50u32 {
+            engine.tick(&InputBatch {
+                events: vec![InputEvent::PointerMove {
+                    screen_px: Vec2::new(100.0 + i as f32, 100.0),
+                    buttons: 1,
+                }],
+            });
+        }
+
+        // Final position should be origin + 50 px, NOT origin + sum(1..=50).
+        assert_vec2_approx(
+            engine.doc.rects[0].pos,
+            Vec2::new(origin.x + 50.0, origin.y),
+            1e-3,
+        );
+    }
 }
