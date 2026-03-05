@@ -5,8 +5,10 @@ use crate::render_scene::{OverlayScene, RenderScene};
 use crate::types::Vec2;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct InputBatch {
     pub events: Vec<InputEvent>,
+    pub tool: ToolMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +44,7 @@ pub enum CursorStyle {
     ResizeTlBr, // TL and BR corners — ↖↘
     ResizeTrBl, // TR and BL corners — ↗↙
     Move,
+    Crosshair,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -50,4 +53,12 @@ pub struct EngineOutput {
     pub render_scene: RenderScene,
     pub overlay_scene: OverlayScene,
     pub cursor: CursorStyle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolMode {
+    #[default]
+    Select,
+    Rect,
 }

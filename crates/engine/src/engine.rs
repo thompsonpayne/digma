@@ -1,9 +1,11 @@
 use std::collections::HashSet;
+use std::future::Pending;
 
+use crate::ToolMode;
 use crate::camera::Camera;
 use crate::drag::{
-    Corner, DragState, HandleHit, MarqueeDrag, PendingMarquee, PendingResize, PendingSelectionMove,
-    ResizeDrag, SelectionDrag,
+    Corner, DragState, HandleHit, MarqueeDrag, PendingMarquee, PendingRectCreate, PendingResize,
+    PendingSelectionMove, ResizeDrag, SelectionDrag,
 };
 use crate::input::{CursorStyle, EngineOutput, InputBatch, InputEvent};
 use crate::render_scene::{self, OverlayScene, RectInstance, RenderScene};
@@ -147,6 +149,7 @@ impl Engine {
                     let hit = self.check_collide_rects(world);
 
                     self.drag_state = if let Some(hit_id) = hit {
+                        // mouse down on a rect (hit)
                         let hit_was_selected = self.selected.contains(&hit_id);
 
                         if hit_was_selected && !shift {
@@ -158,12 +161,19 @@ impl Engine {
                             self.apply_selection(Some(hit_id), shift);
                             DragState::Idle
                         }
-                    } else {
+                    } else if batch.tool == ToolMode::Select {
+                        // mouse down on empty space with `select` tool
                         self.apply_selection(None, shift);
                         DragState::PendingMarquee(PendingMarquee {
                             start_screen_px: screen_px,
                             start_world: world,
                             additive: shift,
+                        })
+                    } else {
+                        // mouse down on empty space with rect `create` tool
+                        DragState::PendingRectCreate(PendingRectCreate {
+                            start_screen_px: screen_px,
+                            start_world: world,
                         })
                     };
                 }
@@ -174,11 +184,16 @@ impl Engine {
                     self.hover_screen_px = Some(screen_px);
                     let world = self.camera.screen_to_world(screen_px);
                     let mut start_marquee: Option<PendingMarquee> = None;
-                    let mut start_move: Option<PendingSelectionMove> = None;
-                    let mut start_resize: Option<PendingResize> = None;
                     let mut continue_marquee = false;
+
+                    let mut start_move: Option<PendingSelectionMove> = None;
                     let mut continue_move = false;
+
+                    let mut start_resize: Option<PendingResize> = None;
                     let mut continue_resize = false;
+
+                    let mut start_rect_create: Option<PendingRectCreate> = None;
+                    let mut continue_rect_create = false;
 
                     match &self.drag_state {
                         DragState::Idle => {}
@@ -217,6 +232,18 @@ impl Engine {
                         }
                         DragState::Resize(_) => {
                             continue_resize = true;
+                        }
+                        DragState::PendingRectCreate(pending) => {
+                            let dx = screen_px.x - pending.start_screen_px.x;
+                            let dy = screen_px.y - pending.start_screen_px.y;
+                            let dist_sq = dx * dx + dy * dy;
+
+                            if dist_sq >= drag_threshold_sq {
+                                start_rect_create = Some(*pending);
+                            }
+                        }
+                        DragState::RectCreate(_) => {
+                            continue_rect_create = true;
                         }
                     }
 
@@ -308,7 +335,7 @@ impl Engine {
             }
         }
 
-        let overlay_scene = self.init_overlay_scene();
+        let overlay_scene = self.update_overlay_scene();
         let cursor = self.compute_cursor();
 
         EngineOutput {
@@ -356,7 +383,7 @@ impl Engine {
         None
     }
 
-    fn init_overlay_scene(&self) -> OverlayScene {
+    fn update_overlay_scene(&self) -> OverlayScene {
         let outline_px = 2.0;
         let handle_px = 8.0;
         let outline = outline_px / self.camera.zoom;
@@ -458,6 +485,8 @@ impl Engine {
                 color: outline_color,
             });
         }
+
+        todo!("if let DragState::RectCreate(drag) = &self.drag_state");
 
         render_scene::OverlayScene {
             rects: overlay_rects,

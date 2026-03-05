@@ -50,6 +50,18 @@ pub struct PendingResize {
     pub start_world: Vec2,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PendingRectCreate {
+    pub start_screen_px: Vec2,
+    pub start_world: Vec2,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RectCreate {
+    pub start_world: Vec2,
+    pub current_world: Vec2,
+}
+
 #[derive(Debug)]
 pub struct ResizeDrag {
     pub handle: HandleHit,
@@ -74,4 +86,7 @@ pub enum DragState {
 
     PendingResize(PendingResize),
     Resize(ResizeDrag),
+
+    PendingRectCreate(PendingRectCreate),
+    RectCreate(RectCreate),
 }
