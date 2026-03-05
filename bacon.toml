@@ -1,0 +1,31 @@
+default_job = "check"
+env.CARGO_TERM_COLOR = "always"
+
+[jobs.check]
+command = ["cargo", "check"]
+need_stdout = false
+
+[jobs.check-engine]
+command = ["cargo", "check", "--package", "engine"]
+need_stdout = false
+
+[jobs.test]
+command = ["cargo", "test", "--package", "engine"]
+need_stdout = true
+
+[jobs.clippy]
+command = ["cargo", "clippy", "--package", "engine"]
+need_stdout = false
+
+[jobs.build-wasm]
+command = [
+    "sh", "-c",
+    "wasm-pack build crates/app_wasm --target web --release --out-dir ../../web/src/wasm/app_wasm"
+]
+need_stdout = true
+allow_warnings = true
+default_watch = false
+watch = ["crates/engine/src", "crates/app_wasm/src", "crates/renderer_wgpu/src"]
+
+[keybindings]
+w = "job:build-wasm"

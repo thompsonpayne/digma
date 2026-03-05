@@ -185,7 +185,7 @@ Pick 1-2:
 - Text alignment issues: keep overlay container in the same stacking context; use a single source of truth for camera transforms.
 - Export including text: composite canvas + overlay text via an offscreen canvas in JS.
 
-## Current Progress (as of Mar 4, 2026)
+## Current Progress (as of Mar 5, 2026)
 
 - WebGPU canvas booted on wasm32 via `renderer_wgpu`.
 - Input batching from `web/` to `app_wasm` tick loop.
@@ -210,7 +210,13 @@ Pick 1-2:
 - Clicking an already-selected shape (without shift) now preserves the multi-selection and starts pending move.
 - Shift remains selection-modifier behavior (toggle/additive), not move-start behavior.
 - Tests added for selection move behavior: single-drag (full flow, below-threshold no-op, cancel), multi-drag (all selected move by same delta, unselected rect untouched, no cumulative drift).
+- Resize handles implemented: `PendingResize` / `Resize` drag states added; all four corners (TL, TR, BL, BR) resize with min-size clamping and no cumulative drift.
+- `CursorStyle` enum added to `EngineOutput` (`Default`, `ResizeTlBr`, `ResizeTrBl`, `Move`); engine computes cursor from hover position and drag state each tick.
+- `hover_screen_px` tracked in `Engine`; all `PointerMove` events (including hover-only) now forwarded to the engine from the frontend.
+- Frontend reads `out.cursor` and applies the corresponding CSS cursor to the canvas element.
+- Engine crate refactored from a single 1450-line `lib.rs` into focused modules: `types`, `camera`, `input`, `drag`, `engine` — `lib.rs` is now a 13-line re-export root.
 
 ## Next Implementation Step
 
-- Implement resize handles (scale transform from overlay handles).
+- Rectangle tool: drag on empty canvas to create a new rect (Week 4).
+- Inspector panel: x/y/w/h and fill color editable fields (Week 4).
