@@ -105,7 +105,7 @@ function App() {
 					return;
 				}
 
-				if (isSelecting && batch) {
+				if (batch) {
 					const rect = canvasRef.getBoundingClientRect();
 					batch.events.push({
 						type: "pointer_move",
@@ -191,7 +191,7 @@ function App() {
 			const frame = () => {
 				if (!running) return;
 				try {
-					const out = app.tick(batch) as { camera: CameraView };
+					const out = app.tick(batch) as { camera: CameraView; cursor: string };
 					if (batch) {
 						batch.events.length = 0;
 					}
@@ -201,6 +201,14 @@ function App() {
 					setCameraText(
 						`pan=(${pan.x.toFixed(2)}, ${pan.y.toFixed(2)}), zoom=${zoom.toFixed(3)}`,
 					);
+
+					const cursorMap: Record<string, string> = {
+						default: "default",
+						resize_tl_br: "nwse-resize",
+						resize_tr_bl: "nesw-resize",
+						move: "move",
+					};
+					canvasRef.style.cursor = cursorMap[out.cursor] ?? "default";
 				} catch (err) {
 					setCameraText(`tick error: ${String(err)}`);
 				}

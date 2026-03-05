@@ -81,6 +81,15 @@ pub enum InputEvent {
     PointerCancel,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorStyle {
+    Default,
+    ResizeTlBr, // TL and BR corners — ↖↘
+    ResizeTrBl, // TR and BL corners — ↗↙
+    Move,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Camera {
     pub pan: Vec2,
@@ -220,8 +229,8 @@ pub struct Engine {
     pub doc: Document,
     pub camera: Camera,
     pub selected: Vec<NodeId>,
-
     pub drag_state: DragState,
+    pub hover_screen_px: Option<Vec2>,
 }
 
 impl Engine {
@@ -256,6 +265,7 @@ impl Engine {
             camera: Camera::default(),
             selected: vec![],
             drag_state: DragState::Idle,
+            hover_screen_px: None,
         }
     }
 
@@ -375,6 +385,7 @@ impl Engine {
                     screen_px,
                     buttons: _buttons,
                 } => {
+                    self.hover_screen_px = Some(screen_px);
                     let world = self.camera.screen_to_world(screen_px);
                     let mut start_marquee: Option<PendingMarquee> = None;
                     let mut start_move: Option<PendingSelectionMove> = None;
@@ -514,11 +525,13 @@ impl Engine {
         }
 
         let overlay_scene = self.init_overlay_scene();
+        let cursor = self.compute_cursor();
 
         EngineOutput {
             camera: self.camera,
             render_scene,
             overlay_scene,
+            cursor,
         }
     }
 
@@ -837,6 +850,28 @@ impl Engine {
             }
         }
     }
+
+    fn compute_cursor(&self) -> CursorStyle {
+        // during an active move drag, always show the move cursor
+        if matches!(
+            self.drag_state,
+            DragState::SelectionMove(_) | DragState::PendingSelectionMove(_)
+        ) {
+            return CursorStyle::Move;
+        }
+
+        // if hovering over a handler, show the resize cursor
+        if let Some(screen_px) = self.hover_screen_px {
+            let world = self.camera.screen_to_world(screen_px);
+            if let Some(hit) = self.check_collide_handle(world) {
+                return match hit.corner {
+                    Corner::TL | Corner::BR => CursorStyle::ResizeTlBr,
+                    Corner::TR | Corner::BL => CursorStyle::ResizeTrBl,
+                };
+            }
+        }
+        CursorStyle::Default
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -844,6 +879,7 @@ pub struct EngineOutput {
     pub camera: Camera,
     pub render_scene: RenderScene,
     pub overlay_scene: OverlayScene,
+    pub cursor: CursorStyle,
 }
 
 #[cfg(test)]
@@ -913,6 +949,7 @@ mod test {
             },
             selected: vec![],
             drag_state: DragState::Idle,
+            hover_screen_px: None,
         };
 
         let batch = InputBatch {
@@ -938,6 +975,7 @@ mod test {
             },
             selected: vec![],
             drag_state: DragState::Idle,
+            hover_screen_px: None,
         };
 
         let pivot = Vec2::new(300.0, 120.0);
@@ -1024,6 +1062,7 @@ mod test {
             camera: Camera::default(),
             selected: vec![],
             drag_state: DragState::Idle,
+            hover_screen_px: None,
         }
     }
 
@@ -1049,6 +1088,7 @@ mod test {
             camera: Camera::default(),
             selected: vec![],
             drag_state: DragState::Idle,
+            hover_screen_px: None,
         }
     }
 
@@ -1356,5 +1396,56 @@ mod test {
             Vec2::new(origin.x + 50.0, origin.y),
             1e-3,
         );
+    }
+
+    #[test]
+    fn cursor_defaults_to_default_with_not_hover() {
+        let engine = engine_with_one_rect();
+        let cursor = engine.compute_cursor();
+        assert_eq!(cursor, CursorStyle::Default);
+    }
+
+    #[test]
+    fn cursor_is_resize_tl_br_when_hovering_tl_handle() {
+        let mut engine = engine_with_one_rect();
+        let id = engine.doc.rects[0].id;
+        engine.selected = vec![id];
+
+        engine.hover_screen_px = Some(Vec2::new(50.0, 50.0));
+        let cursor = engine.compute_cursor();
+        assert_eq!(cursor, CursorStyle::ResizeTlBr);
+    }
+
+    #[test]
+    fn cursor_is_resize_tr_bl_when_hovering_tr_handle() {
+        let mut engine = engine_with_one_rect();
+        let id = engine.doc.rects[0].id;
+        engine.selected = vec![id];
+
+        engine.hover_screen_px = Some(Vec2::new(150.0, 50.0));
+        let cursor = engine.compute_cursor();
+        assert_eq!(cursor, CursorStyle::ResizeTrBl);
+    }
+
+    #[test]
+    fn cursor_is_default_when_outside_handle_radius() {
+        let mut engine = engine_with_one_rect();
+        let id = engine.doc.rects[0].id;
+        engine.selected = vec![id];
+        // Far from any handle
+        engine.hover_screen_px = Some(Vec2::new(100.0, 100.0)); // center of rect
+        let cursor = engine.compute_cursor();
+        assert_eq!(cursor, CursorStyle::Default);
+    }
+
+    #[test]
+    fn cursor_is_move_during_selection_drag() {
+        let mut engine = engine_with_one_rect();
+        engine.drag_state = DragState::PendingSelectionMove(PendingSelectionMove {
+            start_screen_px: Vec2::new(100.0, 100.0),
+            start_world: Vec2::new(100.0, 100.0),
+        });
+        let cursor = engine.compute_cursor();
+        assert_eq!(cursor, CursorStyle::Move);
     }
 }
