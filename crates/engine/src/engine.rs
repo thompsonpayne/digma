@@ -271,9 +271,7 @@ impl Engine {
                             .iter()
                             .enumerate()
                             .filter_map(|(idx, rect)| {
-                                selected_ids
-                                    .contains(&(*rect).id)
-                                    .then_some((idx, rect.pos))
+                                selected_ids.contains(&rect.id).then_some((idx, rect.pos))
                             })
                             .collect();
 
@@ -659,6 +657,12 @@ impl Engine {
         }
 
         CursorStyle::Default
+    }
+}
+
+impl Default for Engine {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
