@@ -57,7 +57,7 @@ pub struct PendingRectCreate {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct RectCreate {
+pub struct RectCreateDrag {
     pub start_world: Vec2,
     pub current_world: Vec2,
 }
@@ -88,5 +88,5 @@ pub enum DragState {
     Resize(ResizeDrag),
 
     PendingRectCreate(PendingRectCreate),
-    RectCreate(RectCreate),
+    RectCreate(RectCreateDrag),
 }

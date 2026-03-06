@@ -23,6 +23,7 @@ type InputEvent =
 	| { type: "pointer_move"; screen_px: Point; buttons: number }
 	| { type: "pointer_cancel" };
 
+// TODO: Add toolbar buttons for `Select` and `Create` action
 function App() {
 	let canvasRef!: HTMLCanvasElement;
 	let spaceDown = false;
