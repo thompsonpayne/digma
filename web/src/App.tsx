@@ -1,5 +1,4 @@
 import { createSignal, onCleanup, onMount } from "solid-js";
-import "./App.css";
 
 type Point = {
 	x: number;
@@ -10,6 +9,13 @@ type CameraView = {
 	pan: Point;
 	zoom: number;
 };
+
+const ToolMode = {
+	select: "select",
+	rect: "rect",
+} as const;
+
+type ToolMode = (typeof ToolMode)[keyof typeof ToolMode];
 
 type InputEvent =
 	| { type: "camera_pan_by_screen_delta"; delta_px: Point }
@@ -23,17 +29,24 @@ type InputEvent =
 	| { type: "pointer_move"; screen_px: Point; buttons: number }
 	| { type: "pointer_cancel" };
 
-// TODO: Add toolbar buttons for `Select` and `Create` action
 function App() {
 	let canvasRef!: HTMLCanvasElement;
 	let spaceDown = false;
 	let isPanning = false;
 	let isSelecting = false;
 	let lastPt: Point | null = null;
-	let batch: { events: InputEvent[] } | null = null;
+	let batch: { events: InputEvent[]; tool: ToolMode } | null = null;
 
 	const [ver, setVer] = createSignal("(loading)");
 	const [cameraText, setCameraText] = createSignal("(no data)");
+	const [toolMode, setToolMode] = createSignal<ToolMode>(ToolMode.select);
+
+	const selectTool = (nextTool: ToolMode): void => {
+		setToolMode(nextTool);
+		if (batch) {
+			batch.tool = nextTool;
+		}
+	};
 
 	onMount(() => {
 		let rafId = 0;
@@ -71,6 +84,7 @@ function App() {
 					isPanning = true;
 					lastPt = { x: e.clientX, y: e.clientY };
 					canvasRef.setPointerCapture(e.pointerId);
+					canvasRef.style.cursor = "grab";
 					e.preventDefault();
 					return;
 				}
@@ -101,6 +115,7 @@ function App() {
 						type: "camera_pan_by_screen_delta",
 						delta_px: { x: dx, y: dy },
 					});
+					canvasRef.style.cursor = "grabbing";
 
 					lastPt = { x: e.clientX, y: e.clientY };
 					return;
@@ -187,7 +202,7 @@ function App() {
 			setVer(m.version());
 
 			const app = await m.App.new(canvasRef);
-			batch = { events: [] };
+			batch = { events: [], tool: toolMode() };
 
 			const frame = () => {
 				if (!running) return;
@@ -208,8 +223,15 @@ function App() {
 						resize_tl_br: "nwse-resize",
 						resize_tr_bl: "nesw-resize",
 						move: "move",
+						crosshair: "crosshair",
+						pan: "grab",
+						panning: "grabbing",
 					};
-					canvasRef.style.cursor = cursorMap[out.cursor] ?? "default";
+					canvasRef.style.cursor = isPanning
+						? "grabbing"
+						: spaceDown
+							? "grab"
+							: cursorMap[out.cursor] ?? "default";
 				} catch (err) {
 					setCameraText(`tick error: ${String(err)}`);
 				}
@@ -230,15 +252,54 @@ function App() {
 	});
 
 	return (
-		<div class="app">
-			<div class="hud">wasm version: {ver()}</div>
-			<div class="hud">{cameraText()}</div>
-			<canvas
-				ref={canvasRef}
-				class="viewport"
-				width={800}
-				height={600}
-			></canvas>
+		<div class="min-h-screen bg-stone-100 px-4 py-6 text-stone-900 sm:px-6">
+			<div class="mx-auto flex max-w-6xl flex-col gap-4">
+				<div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-300 bg-white/90 px-4 py-3 shadow-sm backdrop-blur">
+					<div>
+						<p class="text-sm font-medium uppercase tracking-[0.2em] text-stone-500">
+							Digma
+						</p>
+						<p class="text-sm text-stone-600">wasm version: {ver()}</p>
+					</div>
+					<p class="text-sm text-stone-600">{cameraText()}</p>
+				</div>
+
+				<div class="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-300 bg-white px-4 py-3 shadow-sm">
+					<span class="text-sm font-medium text-stone-600">Tool mode</span>
+					<button
+						type="button"
+						onClick={() => selectTool(ToolMode.select)}
+						class={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+							toolMode() === ToolMode.select
+								? "border-stone-900 bg-stone-900 text-white"
+								: "border-stone-300 bg-stone-50 text-stone-700 hover:border-stone-400 hover:bg-stone-100"
+						}`}
+					>
+						Select
+					</button>
+					<button
+						type="button"
+						onClick={() => selectTool(ToolMode.rect)}
+						class={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+							toolMode() === ToolMode.rect
+								? "border-amber-600 bg-amber-500 text-white"
+								: "border-stone-300 bg-stone-50 text-stone-700 hover:border-stone-400 hover:bg-stone-100"
+						}`}
+					>
+						Rectangle
+					</button>
+					<span class="text-sm text-stone-500">Hold space to pan</span>
+				</div>
+
+				<div class="overflow-hidden rounded-3xl border border-stone-300 bg-white p-3 shadow-lg shadow-stone-300/40">
+					<canvas
+						ref={canvasRef}
+						class="block h-auto max-w-full rounded-2xl border border-stone-200 bg-stone-50"
+						width={800}
+						height={600}
+					></canvas>
+				</div>
+			</div>
 		</div>
 	);
 }

@@ -45,6 +45,8 @@ pub enum CursorStyle {
     ResizeTrBl, // TR and BL corners — ↗↙
     Move,
     Crosshair,
+    Pan,
+    Panning,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
