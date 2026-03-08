@@ -145,13 +145,15 @@ impl Engine {
                     }
 
                     // Handle hit takes priority over rect selection
-                    if let Some(handle_hit) = self.check_collide_handle(world) {
-                        self.drag_state = DragState::PendingResize(PendingResize {
-                            handle: handle_hit,
-                            start_screen_px: screen_px,
-                            start_world: world,
-                        });
-                        continue;
+                    if batch.tool == ToolMode::Select {
+                        if let Some(handle_hit) = self.check_collide_handle(world) {
+                            self.drag_state = DragState::PendingResize(PendingResize {
+                                handle: handle_hit,
+                                start_screen_px: screen_px,
+                                start_world: world,
+                            });
+                            continue;
+                        }
                     }
 
                     let hit = self.check_collide_rects(world);
@@ -372,8 +374,8 @@ impl Engine {
             }
         }
 
-        let overlay_scene = self.update_overlay_scene();
-        let cursor = self.compute_cursor();
+        let overlay_scene = self.update_overlay_scene(&batch.tool);
+        let cursor = self.compute_cursor(&batch.tool);
 
         EngineOutput {
             camera: self.camera,
@@ -420,7 +422,7 @@ impl Engine {
         None
     }
 
-    fn update_overlay_scene(&self) -> OverlayScene {
+    fn update_overlay_scene(&self, tool_mode: &ToolMode) -> OverlayScene {
         let outline_px = 2.0;
         let handle_px = 8.0;
         let outline = outline_px / self.camera.zoom;
@@ -429,6 +431,10 @@ impl Engine {
         let handle_color = [0.1, 0.6, 1.0, 1.0];
         let mut overlay_rects = Vec::new();
         for id in &self.selected {
+            if matches!(tool_mode, ToolMode::Rect) {
+                break;
+            }
+
             let Some(rect) = self.doc.rects.iter().find(|r| r.id == *id) else {
                 continue;
             };
@@ -743,7 +749,7 @@ impl Engine {
     }
 
     /// Determine the cursor style to show based on current hover position and drag state.
-    pub fn compute_cursor(&self) -> CursorStyle {
+    pub fn compute_cursor(&self, tool_mode: &ToolMode) -> CursorStyle {
         // Show the rect create cross hair cursor
         if matches!(
             self.drag_state,
@@ -761,13 +767,15 @@ impl Engine {
         }
 
         // If hovering over a handle, show the appropriate resize cursor.
-        if let Some(screen_px) = self.hover_screen_px {
-            let world = self.camera.screen_to_world(screen_px);
-            if let Some(hit) = self.check_collide_handle(world) {
-                return match hit.corner {
-                    Corner::TL | Corner::BR => CursorStyle::ResizeTlBr,
-                    Corner::TR | Corner::BL => CursorStyle::ResizeTrBl,
-                };
+        if matches!(tool_mode, ToolMode::Select) {
+            if let Some(screen_px) = self.hover_screen_px {
+                let world = self.camera.screen_to_world(screen_px);
+                if let Some(hit) = self.check_collide_handle(world) {
+                    return match hit.corner {
+                        Corner::TL | Corner::BR => CursorStyle::ResizeTlBr,
+                        Corner::TR | Corner::BL => CursorStyle::ResizeTrBl,
+                    };
+                }
             }
         }
 
@@ -1326,7 +1334,7 @@ mod test {
     #[test]
     fn cursor_defaults_to_default_with_not_hover() {
         let engine = engine_with_one_rect();
-        let cursor = engine.compute_cursor();
+        let cursor = engine.compute_cursor(&ToolMode::Select);
         assert_eq!(cursor, CursorStyle::Default);
     }
 
@@ -1337,7 +1345,7 @@ mod test {
         engine.selected = vec![id];
 
         engine.hover_screen_px = Some(Vec2::new(50.0, 50.0));
-        let cursor = engine.compute_cursor();
+        let cursor = engine.compute_cursor(&ToolMode::Select);
         assert_eq!(cursor, CursorStyle::ResizeTlBr);
     }
 
@@ -1348,7 +1356,7 @@ mod test {
         engine.selected = vec![id];
 
         engine.hover_screen_px = Some(Vec2::new(150.0, 50.0));
-        let cursor = engine.compute_cursor();
+        let cursor = engine.compute_cursor(&ToolMode::Select);
         assert_eq!(cursor, CursorStyle::ResizeTrBl);
     }
 
@@ -1359,7 +1367,7 @@ mod test {
         engine.selected = vec![id];
         // Far from any handle
         engine.hover_screen_px = Some(Vec2::new(100.0, 100.0)); // center of rect
-        let cursor = engine.compute_cursor();
+        let cursor = engine.compute_cursor(&ToolMode::Select);
         assert_eq!(cursor, CursorStyle::Default);
     }
 
@@ -1370,7 +1378,7 @@ mod test {
             start_screen_px: Vec2::new(100.0, 100.0),
             start_world: Vec2::new(100.0, 100.0),
         });
-        let cursor = engine.compute_cursor();
+        let cursor = engine.compute_cursor(&ToolMode::Select);
         assert_eq!(cursor, CursorStyle::Move);
     }
 }

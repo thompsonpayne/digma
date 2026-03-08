@@ -34,6 +34,7 @@ function App() {
 	let spaceDown = false;
 	let isPanning = false;
 	let isSelecting = false;
+	let isRectCreating = false;
 	let lastPt: Point | null = null;
 	let batch: { events: InputEvent[]; tool: ToolMode } | null = null;
 
@@ -90,7 +91,11 @@ function App() {
 				}
 
 				if (e.button === 0 && batch) {
-					isSelecting = true;
+					if (toolMode() === ToolMode.select) {
+						isSelecting = true;
+					} else if (toolMode() === ToolMode.rect) {
+						isRectCreating = true;
+					}
 					canvasRef.setPointerCapture(e.pointerId);
 					const rect = canvasRef.getBoundingClientRect();
 					batch.events.push({
@@ -144,8 +149,13 @@ function App() {
 					return;
 				}
 
-				if (isSelecting && batch) {
-					isSelecting = false;
+				if ((isSelecting || isRectCreating) && batch) {
+					if (toolMode() === ToolMode.select) {
+						isSelecting = false;
+					} else if (toolMode() === ToolMode.rect) {
+						isRectCreating = false;
+						selectTool(ToolMode.select);
+					}
 					canvasRef.releasePointerCapture(e.pointerId);
 					const rect = canvasRef.getBoundingClientRect();
 					batch.events.push({
@@ -168,8 +178,13 @@ function App() {
 					return;
 				}
 
-				if (isSelecting && batch) {
-					isSelecting = false;
+				if ((isSelecting || isRectCreating) && batch) {
+					if (toolMode() === ToolMode.select) {
+						isSelecting = false;
+					} else if (toolMode() === ToolMode.rect) {
+						isRectCreating = false;
+					}
+
 					canvasRef.releasePointerCapture(e.pointerId);
 					batch.events.push({
 						type: "pointer_cancel",
@@ -231,7 +246,7 @@ function App() {
 						? "grabbing"
 						: spaceDown
 							? "grab"
-							: cursorMap[out.cursor] ?? "default";
+							: (cursorMap[out.cursor] ?? "default");
 				} catch (err) {
 					setCameraText(`tick error: ${String(err)}`);
 				}
