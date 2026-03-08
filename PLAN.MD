@@ -185,7 +185,7 @@ Pick 1-2:
 - Text alignment issues: keep overlay container in the same stacking context; use a single source of truth for camera transforms.
 - Export including text: composite canvas + overlay text via an offscreen canvas in JS.
 
-## Current Progress (as of Mar 5, 2026)
+## Current Progress (as of Mar 8, 2026)
 
 - WebGPU canvas booted on wasm32 via `renderer_wgpu`.
 - Input batching from `web/` to `app_wasm` tick loop.
@@ -215,8 +215,18 @@ Pick 1-2:
 - `hover_screen_px` tracked in `Engine`; all `PointerMove` events (including hover-only) now forwarded to the engine from the frontend.
 - Frontend reads `out.cursor` and applies the corresponding CSS cursor to the canvas element.
 - Engine crate refactored from a single 1450-line `lib.rs` into focused modules: `types`, `camera`, `input`, `drag`, `engine` — `lib.rs` is now a 13-line re-export root.
+- `ToolMode` now flows through `InputBatch` end-to-end (`Select`, `Rect`) so the engine can branch interaction behavior per active tool.
+- Rectangle tool implemented in the engine with `PendingRectCreate` / `RectCreate` drag states, drag-threshold activation, live overlay preview, and commit-on-release creation.
+- New rectangles are normalized from drag bounds, clamped to a minimum size, inserted into the document with a fresh `NodeId`, and auto-selected after creation.
+- Frontend now exposes explicit Select / Rectangle toolbar controls and syncs tool changes into the per-frame input batch.
+- Canvas input handling now supports space-drag panning in the frontend and automatically switches back to Select after finishing a rectangle creation gesture.
+- Cursor behavior expanded for drawing/panning UX: rect creation shows a crosshair, while the frontend resolves grab / grabbing during space-pan interactions.
+- Web app runtime split into focused frontend modules (`App`, `createCanvasInputController`, `createWasmApp`, `editorTypes`) instead of a monolithic entry flow.
+- Tailwind CSS is now wired into the Vite frontend, and the app has a basic editor shell with header, toolbar, and framed canvas workspace.
+- Frontend test setup added with Vitest + Solid Testing Library; smoke tests now cover app boot rendering and rectangle tool switching.
+- Verified status: `cargo test -p engine` passes (19 tests), and `pnpm -C web test:run` passes.
 
 ## Next Implementation Step
 
-- Rectangle tool: drag on empty canvas to create a new rect (Week 4).
-- Inspector panel: x/y/w/h and fill color editable fields (Week 4).
+- Inspector panel: editable `x/y/w/h` and fill color for the current selection (Week 4).
+- Route rect create / move / resize through the command system so undo/redo can cover the core editing workflow.
