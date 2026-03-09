@@ -1,8 +1,12 @@
-import { onCleanup, onMount } from "solid-js";
 import type { Accessor } from "solid-js";
-
+import { onCleanup, onMount } from "solid-js";
+import type {
+  InputBatch,
+  InputEvent,
+  Point,
+  ToolMode as ToolModeValue,
+} from "./editorTypes";
 import { ToolMode } from "./editorTypes";
-import type { InputBatch, Point, ToolMode as ToolModeValue } from "./editorTypes";
 
 type InteractionState =
   | { kind: "idle" }
@@ -18,7 +22,10 @@ type CreateCanvasInputControllerOptions = {
 
 const IDLE_INTERACTION: InteractionState = { kind: "idle" };
 
-function toCanvasPoint(canvas: HTMLCanvasElement, event: PointerEvent | WheelEvent): Point {
+function toCanvasPoint(
+  canvas: HTMLCanvasElement,
+  event: PointerEvent | WheelEvent,
+): Point {
   const rect = canvas.getBoundingClientRect();
 
   return {
@@ -27,13 +34,18 @@ function toCanvasPoint(canvas: HTMLCanvasElement, event: PointerEvent | WheelEve
   };
 }
 
-function releasePointerCapture(canvas: HTMLCanvasElement, pointerId: number): void {
+function releasePointerCapture(
+  canvas: HTMLCanvasElement,
+  pointerId: number,
+): void {
   if (canvas.hasPointerCapture(pointerId)) {
     canvas.releasePointerCapture(pointerId);
   }
 }
 
-export function createCanvasInputController(options: CreateCanvasInputControllerOptions) {
+export function createCanvasInputController(
+  options: CreateCanvasInputControllerOptions,
+) {
   let batch: InputBatch | null = null;
   let interaction: InteractionState = IDLE_INTERACTION;
   let spaceDown = false;
@@ -46,6 +58,10 @@ export function createCanvasInputController(options: CreateCanvasInputController
     }
 
     return batch;
+  };
+
+  const pushEvent = (event: InputEvent): void => {
+    ensureBatch(options.toolMode()).events.push(event);
   };
 
   const clearBatchEvents = (): void => {
@@ -170,7 +186,11 @@ export function createCanvasInputController(options: CreateCanvasInputController
           return;
         }
 
-        if ((interaction.kind === "selecting" || interaction.kind === "rectCreating") && batch) {
+        if (
+          (interaction.kind === "selecting" ||
+            interaction.kind === "rectCreating") &&
+          batch
+        ) {
           const finishedInteraction = interaction;
           interaction = IDLE_INTERACTION;
 
@@ -198,7 +218,11 @@ export function createCanvasInputController(options: CreateCanvasInputController
           return;
         }
 
-        if ((interaction.kind === "selecting" || interaction.kind === "rectCreating") && batch) {
+        if (
+          (interaction.kind === "selecting" ||
+            interaction.kind === "rectCreating") &&
+          batch
+        ) {
           const cancelledInteraction = interaction;
           interaction = IDLE_INTERACTION;
 
@@ -234,6 +258,7 @@ export function createCanvasInputController(options: CreateCanvasInputController
   return {
     clearBatchEvents,
     ensureBatch,
+    pushEvent,
     getBatch,
     isPanning,
     isSpaceDown,

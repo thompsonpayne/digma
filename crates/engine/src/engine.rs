@@ -101,19 +101,6 @@ impl Engine {
     /// # Arguments
     /// * `batch` - list of input events to process
     pub fn tick(&mut self, batch: &InputBatch) -> EngineOutput {
-        let render_scene = RenderScene {
-            rects: self
-                .doc
-                .rects
-                .iter()
-                .map(|r| RectInstance {
-                    pos: [r.pos.x, r.pos.y],
-                    size: [r.size.x, r.size.y],
-                    color: r.color,
-                })
-                .collect(),
-        };
-
         let drag_threshold_px: f32 = 6.0;
         let drag_threshold_sq: f32 = drag_threshold_px * drag_threshold_px;
 
@@ -145,15 +132,15 @@ impl Engine {
                     }
 
                     // Handle hit takes priority over rect selection
-                    if batch.tool == ToolMode::Select {
-                        if let Some(handle_hit) = self.check_collide_handle(world) {
-                            self.drag_state = DragState::PendingResize(PendingResize {
-                                handle: handle_hit,
-                                start_screen_px: screen_px,
-                                start_world: world,
-                            });
-                            continue;
-                        }
+                    if batch.tool == ToolMode::Select
+                        && let Some(handle_hit) = self.check_collide_handle(world)
+                    {
+                        self.drag_state = DragState::PendingResize(PendingResize {
+                            handle: handle_hit,
+                            start_screen_px: screen_px,
+                            start_world: world,
+                        });
+                        continue;
                     }
 
                     let hit = self.check_collide_rects(world);
@@ -371,8 +358,30 @@ impl Engine {
                 InputEvent::PointerCancel => {
                     self.drag_state = DragState::Idle;
                 }
+                InputEvent::SetSelectionFill { color } => {
+                    let selected: HashSet<NodeId> = self.selected.iter().copied().collect();
+
+                    for rect in &mut self.doc.rects {
+                        if selected.contains(&rect.id) {
+                            rect.color = [color.r, color.g, color.b, color.a];
+                        }
+                    }
+                }
             }
         }
+
+        let render_scene = RenderScene {
+            rects: self
+                .doc
+                .rects
+                .iter()
+                .map(|r| RectInstance {
+                    pos: [r.pos.x, r.pos.y],
+                    size: [r.size.x, r.size.y],
+                    color: r.color,
+                })
+                .collect(),
+        };
 
         let overlay_scene = self.update_overlay_scene(&batch.tool);
         let cursor = self.compute_cursor(&batch.tool);
@@ -767,15 +776,15 @@ impl Engine {
         }
 
         // If hovering over a handle, show the appropriate resize cursor.
-        if matches!(tool_mode, ToolMode::Select) {
-            if let Some(screen_px) = self.hover_screen_px {
-                let world = self.camera.screen_to_world(screen_px);
-                if let Some(hit) = self.check_collide_handle(world) {
-                    return match hit.corner {
-                        Corner::TL | Corner::BR => CursorStyle::ResizeTlBr,
-                        Corner::TR | Corner::BL => CursorStyle::ResizeTrBl,
-                    };
-                }
+        if matches!(tool_mode, ToolMode::Select)
+            && let Some(screen_px) = self.hover_screen_px
+        {
+            let world = self.camera.screen_to_world(screen_px);
+            if let Some(hit) = self.check_collide_handle(world) {
+                return match hit.corner {
+                    Corner::TL | Corner::BR => CursorStyle::ResizeTlBr,
+                    Corner::TR | Corner::BL => CursorStyle::ResizeTrBl,
+                };
             }
         }
 

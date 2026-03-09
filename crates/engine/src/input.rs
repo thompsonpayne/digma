@@ -35,6 +35,17 @@ pub enum InputEvent {
         button: u8,
     },
     PointerCancel,
+    SetSelectionFill {
+        color: RgbaColor,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RgbaColor {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
