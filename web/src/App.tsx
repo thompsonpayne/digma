@@ -108,7 +108,7 @@ function App() {
               name="color-fill-picker"
               type="color"
               value={fillColor()}
-              onChange={(e) => {
+              onInput={(e) => {
                 if (
                   e.currentTarget.value !== null &&
                   e.currentTarget.value !== undefined
