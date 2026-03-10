@@ -121,7 +121,6 @@ function App() {
 
           <Show when={fillColor()}>
             <div>
-              <span>Fill color is: </span>
               <span class="font-bold" style={{ color: `${fillColor()}` }}>
                 {fillColor()}
               </span>

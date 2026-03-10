@@ -223,10 +223,12 @@ Pick 1-2:
 - Cursor behavior expanded for drawing/panning UX: rect creation shows a crosshair, while the frontend resolves grab / grabbing during space-pan interactions.
 - Web app runtime split into focused frontend modules (`App`, `createCanvasInputController`, `createWasmApp`, `editorTypes`) instead of a monolithic entry flow.
 - Tailwind CSS is now wired into the Vite frontend, and the app has a basic editor shell with header, toolbar, and framed canvas workspace.
+- Inspector-driven fill editing is now wired end-to-end: the SolidJS inspector uses a native color picker, converts hex to RGBA, and enqueues a semantic `set_selection_fill` batch event.
+- The engine now applies `set_selection_fill` to the current selection by mutating selected rect colors in the document, and render scene generation reflects the updated fill state.
 - Frontend test setup added with Vitest + Solid Testing Library; smoke tests now cover app boot rendering and rectangle tool switching.
 - Verified status: `cargo test -p engine` passes (19 tests), and `pnpm -C web test:run` passes.
 
 ## Next Implementation Step
 
-- Inspector panel: editable `x/y/w/h` and fill color for the current selection (Week 4).
+- Inspector panel: add editable `x/y/w/h` plus stroke controls for the current selection (Week 4).
 - Route rect create / move / resize through the command system so undo/redo can cover the core editing workflow.
