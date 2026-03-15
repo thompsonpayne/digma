@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use crate::ToolMode;
 use crate::camera::Camera;
 use crate::drag::{
     Corner, DragState, HandleHit, MarqueeDrag, PendingMarquee, PendingRectCreate, PendingResize,
@@ -9,6 +8,7 @@ use crate::drag::{
 use crate::input::{CursorStyle, EngineOutput, InputBatch, InputEvent};
 use crate::render_scene::{self, OverlayScene, RectInstance, RenderScene};
 use crate::types::{Document, NodeId, RectNode, Vec2};
+use crate::{RectGeometry, RectGeometryChange, ToolCommand, ToolMode};
 
 pub struct Engine {
     pub doc: Document,
@@ -16,6 +16,9 @@ pub struct Engine {
     pub selected: Vec<NodeId>,
     pub drag_state: DragState,
     pub hover_screen_px: Option<Vec2>,
+
+    undo_stack: Vec<ToolCommand>,
+    redo_stack: Vec<ToolCommand>,
 }
 
 impl Engine {
@@ -51,6 +54,8 @@ impl Engine {
             selected: vec![],
             drag_state: DragState::Idle,
             hover_screen_px: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 
@@ -127,6 +132,7 @@ impl Engine {
                         self.drag_state = DragState::PendingRectCreate(PendingRectCreate {
                             start_screen_px: screen_px,
                             start_world: world,
+                            previous_selection: self.selected.clone(),
                         });
                         continue;
                     }
@@ -153,6 +159,7 @@ impl Engine {
                             DragState::PendingSelectionMove(PendingSelectionMove {
                                 start_screen_px: screen_px,
                                 start_world: world,
+                                previous_selection: self.selected.clone(),
                             })
                         } else {
                             self.apply_selection(Some(hit_id), shift);
@@ -206,7 +213,7 @@ impl Engine {
                             let dist_sq = dx * dx + dy * dy;
 
                             if dist_sq >= drag_threshold_sq {
-                                start_move = Some(*pending);
+                                start_move = Some(pending.clone());
                             }
                         }
                         DragState::SelectionMove(_) => {
@@ -230,7 +237,7 @@ impl Engine {
                             let dist_sq = dx * dx + dy * dy;
 
                             if dist_sq >= drag_threshold_sq {
-                                start_rect_create = Some(*pending);
+                                start_rect_create = Some(pending.clone());
                             }
                         }
                         DragState::RectCreate(_) => {
@@ -283,13 +290,14 @@ impl Engine {
 
                     if let Some(pending) = start_move {
                         let selected_ids: HashSet<NodeId> = self.selected.iter().copied().collect();
-                        let origins: Vec<(usize, Vec2)> = self
+                        let origins: Vec<(NodeId, Vec2)> = self
                             .doc
                             .rects
                             .iter()
-                            .enumerate()
-                            .filter_map(|(idx, rect)| {
-                                selected_ids.contains(&rect.id).then_some((idx, rect.pos))
+                            .filter_map(|rect| {
+                                selected_ids
+                                    .contains(&rect.id)
+                                    .then_some((rect.id, rect.pos))
                             })
                             .collect();
 
@@ -311,6 +319,7 @@ impl Engine {
                         self.drag_state = DragState::RectCreate(RectCreateDrag {
                             start_world: pending.start_world,
                             current_world: world,
+                            previous_selection: pending.previous_selection.clone(),
                         });
                     } else if continue_rect_create
                         && let DragState::RectCreate(drag) = &mut self.drag_state
@@ -328,35 +337,72 @@ impl Engine {
                         self.update_marquee(None, Some(world), false);
                     }
 
-                    if let DragState::RectCreate(drag) = &self.drag_state {
-                        // commit rect to the doc to create it
-                        let min_size = 1.0f32;
+                    let drag_state = std::mem::replace(&mut self.drag_state, DragState::Idle);
 
-                        let min_x = drag.start_world.x.min(drag.current_world.x);
-                        let min_y = drag.start_world.y.min(drag.current_world.y);
-                        let raw_w = (drag.start_world.x - drag.current_world.x).abs();
-                        let raw_h = (drag.start_world.y - drag.current_world.y).abs();
+                    let command = match drag_state {
+                        DragState::SelectionMove(drag) => {
+                            let changes: Vec<RectGeometryChange> = drag
+                                .origins
+                                .into_iter()
+                                .filter_map(|(id, origin_pos)| {
+                                    let before = RectGeometry {
+                                        pos: origin_pos,
+                                        size: self.rect(id)?.size,
+                                    };
+                                    self.geometry_change_for_rect(id, before)
+                                })
+                                .collect();
 
-                        let w = raw_w.max(min_size);
-                        let h = raw_h.max(min_size);
+                            (!changes.is_empty())
+                                .then_some(ToolCommand::SetRectsGeometry { changes })
+                        }
+                        DragState::Resize(drag) => self
+                            .geometry_change_for_rect(
+                                drag.handle.node_id,
+                                RectGeometry {
+                                    pos: drag.origin_pos,
+                                    size: drag.origin_size,
+                                },
+                            )
+                            .map(|change| ToolCommand::SetRectsGeometry {
+                                changes: vec![change],
+                            }),
+                        DragState::RectCreate(drag) => {
+                            let min_size = 1.0f32;
 
-                        let new_id = self.doc.alloc_id();
+                            let min_x = drag.start_world.x.min(drag.current_world.x);
+                            let min_y = drag.start_world.y.min(drag.current_world.y);
+                            let raw_w = (drag.start_world.x - drag.current_world.x).abs();
+                            let raw_h = (drag.start_world.y - drag.current_world.y).abs();
 
-                        self.doc.rects.push(RectNode {
-                            id: new_id,
-                            pos: Vec2::new(min_x, min_y),
-                            size: Vec2::new(w, h),
-                            color: [0.769, 0.769, 0.769, 1.0],
-                        });
+                            let w = raw_w.max(min_size);
+                            let h = raw_h.max(min_size);
 
-                        self.selected = vec![new_id];
+                            let rect = RectNode {
+                                id: self.doc.alloc_id(),
+                                pos: Vec2::new(min_x, min_y),
+                                size: Vec2::new(w, h),
+                                color: [0.769, 0.769, 0.769, 1.0],
+                            };
+
+                            Some(ToolCommand::CreateRect {
+                                next_selection: vec![rect.id],
+                                previous_selection: drag.previous_selection,
+                                rect,
+                            })
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(command) = command {
+                        if matches!(command, ToolCommand::CreateRect { .. }) {
+                            self.apply_command(&command, true);
+                        }
+                        self.push_history(command);
                     }
-
-                    // reset pending
-                    self.drag_state = DragState::Idle;
                 }
                 InputEvent::PointerCancel => {
-                    self.drag_state = DragState::Idle;
+                    self.rollback_active_drag();
                 }
                 InputEvent::SetSelectionFill { color } => {
                     let selected: HashSet<NodeId> = self.selected.iter().copied().collect();
@@ -366,6 +412,12 @@ impl Engine {
                             rect.color = [color.r, color.g, color.b, color.a];
                         }
                     }
+                }
+                InputEvent::Undo => {
+                    self.undo();
+                }
+                InputEvent::Redo => {
+                    self.redo();
                 }
             }
         }
@@ -643,19 +695,149 @@ impl Engine {
 
     /// Update rect positions when `DragState` is `SelectionMove`.
     fn apply_selection_drag(&mut self) {
-        let drag = match &self.drag_state {
-            DragState::SelectionMove(drag) => drag,
-            _ => return,
+        let (doc, drag_state) = (&mut self.doc, &self.drag_state);
+
+        let DragState::SelectionMove(drag) = drag_state else {
+            return;
         };
 
         let dx = drag.current_world.x - drag.start_world.x;
         let dy = drag.current_world.y - drag.start_world.y;
 
-        for (idx, origin) in &drag.origins {
-            if let Some(rect) = self.doc.rects.get_mut(*idx) {
+        for (node_id, origin) in &drag.origins {
+            if let Some(rect) = doc.rects.iter_mut().find(|rect| rect.id == *node_id) {
                 rect.pos.x = origin.x + dx;
                 rect.pos.y = origin.y + dy;
             }
+        }
+    }
+
+    fn rect_index(&self, id: NodeId) -> Option<usize> {
+        self.doc.rects.iter().position(|rect| rect.id == id)
+    }
+
+    fn rect(&self, id: NodeId) -> Option<&RectNode> {
+        self.doc.rects.iter().find(|rect| rect.id == id)
+    }
+
+    fn rect_mut(&mut self, id: NodeId) -> Option<&mut RectNode> {
+        self.doc.rects.iter_mut().find(|rect| rect.id == id)
+    }
+
+    fn push_history(&mut self, command: ToolCommand) {
+        self.undo_stack.push(command);
+        self.redo_stack.clear();
+    }
+
+    fn apply_command(&mut self, command: &ToolCommand, forward: bool) {
+        match command {
+            ToolCommand::CreateRect {
+                rect,
+                previous_selection,
+                next_selection,
+            } => {
+                if forward {
+                    if self.rect_index(rect.id).is_none() {
+                        self.doc.rects.push(rect.clone());
+                    }
+                    self.selected = next_selection.clone();
+                } else {
+                    if let Some(idx) = self.rect_index(rect.id) {
+                        self.doc.rects.remove(idx);
+                    }
+                    self.selected = previous_selection.clone();
+                }
+            }
+            ToolCommand::SetRectsGeometry { changes } => {
+                for change in changes {
+                    let geometry = if forward { change.after } else { change.before };
+                    if let Some(rect) = self.rect_mut(change.id) {
+                        rect.pos = geometry.pos;
+                        rect.size = geometry.size;
+                    }
+                }
+            }
+        }
+    }
+
+    fn rollback_active_drag(&mut self) {
+        enum Rollback {
+            SelectionMove(Vec<(NodeId, Vec2)>),
+            Resize {
+                node_id: NodeId,
+                origin_pos: Vec2,
+                origin_size: Vec2,
+            },
+            None,
+        }
+
+        let drag_state = std::mem::replace(&mut self.drag_state, DragState::Idle);
+
+        let rollback = match drag_state {
+            DragState::SelectionMove(drag) => Rollback::SelectionMove(drag.origins),
+            DragState::Resize(drag) => Rollback::Resize {
+                node_id: drag.handle.node_id,
+                origin_pos: drag.origin_pos,
+                origin_size: drag.origin_size,
+            },
+            _ => Rollback::None,
+        };
+
+        match rollback {
+            Rollback::SelectionMove(origins) => {
+                for (id, origin) in origins {
+                    if let Some(rect) = self.rect_mut(id) {
+                        rect.pos = origin;
+                    }
+                }
+            }
+            Rollback::Resize {
+                node_id,
+                origin_pos,
+                origin_size,
+            } => {
+                if let Some(rect) = self.rect_mut(node_id) {
+                    rect.pos = origin_pos;
+                    rect.size = origin_size;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn undo(&mut self) {
+        if !matches!(self.drag_state, DragState::Idle) {
+            return;
+        }
+
+        if let Some(command) = self.undo_stack.pop() {
+            self.apply_command(&command, false);
+            self.redo_stack.push(command);
+        }
+    }
+
+    fn redo(&mut self) {
+        if !matches!(self.drag_state, DragState::Idle) {
+            return;
+        }
+
+        if let Some(command) = self.redo_stack.pop() {
+            self.apply_command(&command, true);
+            self.undo_stack.push(command);
+        }
+    }
+
+    fn geometry_change_for_rect(
+        &self,
+        id: NodeId,
+        before: RectGeometry,
+    ) -> Option<RectGeometryChange> {
+        let rect = self.rect(id)?;
+        let after = RectGeometry::from_rect(rect);
+        if before != after {
+            Some(RectGeometryChange { id, before, after })
+        } else {
+            None
         }
     }
 
@@ -866,6 +1048,8 @@ mod test {
             selected: vec![],
             drag_state: DragState::Idle,
             hover_screen_px: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         };
 
         let batch = InputBatch {
@@ -893,6 +1077,8 @@ mod test {
             selected: vec![],
             drag_state: DragState::Idle,
             hover_screen_px: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         };
 
         let pivot = Vec2::new(300.0, 120.0);
@@ -982,6 +1168,8 @@ mod test {
             selected: vec![],
             drag_state: DragState::Idle,
             hover_screen_px: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 
@@ -1008,6 +1196,8 @@ mod test {
             selected: vec![],
             drag_state: DragState::Idle,
             hover_screen_px: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 
@@ -1175,8 +1365,7 @@ mod test {
             tool: ToolMode::Select,
         });
         assert!(matches!(engine.drag_state, DragState::Idle));
-        // Position is retained at last moved location (no rollback in the engine).
-        assert_vec2_approx(engine.doc.rects[0].pos, pos_after_move, 1e-4);
+        assert_vec2_approx(engine.doc.rects[0].pos, origin, 1e-4);
     }
 
     // -----------------------------------------------------------------------
@@ -1386,6 +1575,7 @@ mod test {
         engine.drag_state = DragState::PendingSelectionMove(PendingSelectionMove {
             start_screen_px: Vec2::new(100.0, 100.0),
             start_world: Vec2::new(100.0, 100.0),
+            previous_selection: vec![],
         });
         let cursor = engine.compute_cursor(&ToolMode::Select);
         assert_eq!(cursor, CursorStyle::Move);

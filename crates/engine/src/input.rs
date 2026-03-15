@@ -38,6 +38,8 @@ pub enum InputEvent {
     SetSelectionFill {
         color: RgbaColor,
     },
+    Undo,
+    Redo,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
