@@ -138,7 +138,7 @@ Deliverable: selection feels reliable.
 - Rectangle tool (drag to create).
 - Move selection (drag).
 - Resize handles (scale).
-- Inspector edits for x/y/w/h, fill/stroke.
+- Basic style edits from the toolbar (fill color today; full inspector deferred).
 
 Deliverable: basic drawing + editing workflow.
 
@@ -223,6 +223,7 @@ Pick 1-2:
 - Cursor behavior expanded for drawing/panning UX: rect creation shows a crosshair, while the frontend resolves grab / grabbing during space-pan interactions.
 - Web app runtime split into focused frontend modules (`App`, `createCanvasInputController`, `createWasmApp`, `editorTypes`) instead of a monolithic entry flow.
 - Tailwind CSS is now wired into the Vite frontend, and the app has a basic editor shell with header, toolbar, and framed canvas workspace.
+- Toolbar fill color editing added; selected rectangles can now be recolored from the frontend.
 - Frontend test setup added with Vitest + Solid Testing Library; smoke tests now cover app boot rendering and rectangle tool switching.
 - Command history module added in `engine` (`history.rs`) with gesture-level commands for rect creation and rect geometry edits (`CreateRect`, `SetRectsGeometry`).
 - Rectangle create / move / resize now finalize through the command system: create commits a `CreateRect` command, while move and resize capture before/after geometry and push a single history entry on pointer release.
@@ -234,4 +235,4 @@ Pick 1-2:
 
 ## Next Implementation Step
 
-- Inspector panel: editable `x/y/w/h` and fill color for the current selection (Week 4).
+- Layers + ordering: implement a selection-synced layers list and undoable bring-forward / send-backward / delete commands, using `Document.rects` order as the single source of truth (Week 5).
