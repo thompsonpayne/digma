@@ -21,22 +21,6 @@ pub struct PendingMarquee {
     pub additive: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct MarqueeDrag {
-    pub start_world: Vec2,
-    pub current_world: Vec2,
-    pub additive: bool, // shift key active
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SelectionDrag {
-    pub start_world: Vec2,
-    pub current_world: Vec2,
-
-    // Snapshot selected rect index + original position to avoid cumulative drift
-    pub origins: Vec<(NodeId, Vec2)>,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct PendingSelectionMove {
     pub start_screen_px: Vec2,
@@ -59,13 +43,29 @@ pub struct PendingRectCreate {
 }
 
 #[derive(Debug, Clone)]
+pub struct MarqueeDrag {
+    pub start_world: Vec2,
+    pub current_world: Vec2,
+    pub additive: bool, // shift key active
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SelectionDrag {
+    pub start_world: Vec2,
+    pub current_world: Vec2,
+
+    // Snapshot selected rect index + original position to avoid cumulative drift
+    pub origins: Vec<(NodeId, Vec2)>,
+}
+
+#[derive(Debug, Clone)]
 pub struct RectCreateDrag {
     pub start_world: Vec2,
     pub current_world: Vec2,
     pub previous_selection: Vec<NodeId>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResizeDrag {
     pub handle: HandleHit,
     pub start_world: Vec2,

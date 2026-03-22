@@ -1,8 +1,7 @@
-import { createSignal, onCleanup, onMount } from "solid-js";
 import type { Accessor } from "solid-js";
-
-import type { CameraView, TickOutput, ToolMode } from "./editorTypes";
+import { createSignal, onCleanup, onMount } from "solid-js";
 import type { createCanvasInputController } from "./createCanvasInputController";
+import type { CameraView, TickOutput, ToolMode } from "./editorTypes";
 
 type WasmAppInstance = import("./wasm/app_wasm/app_wasm").App;
 type WasmModule = typeof import("./wasm/app_wasm/app_wasm");
@@ -23,7 +22,11 @@ const CURSOR_MAP: Record<string, string> = {
   panning: "grabbing",
 };
 
-function resolveCursor(cursor: string, isPanning: boolean, isSpaceDown: boolean): string {
+function resolveCursor(
+  cursor: string,
+  isPanning: boolean,
+  isSpaceDown: boolean,
+): string {
   if (isPanning) {
     return "grabbing";
   }

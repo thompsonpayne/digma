@@ -34,4 +34,12 @@ pub enum ToolCommand {
     SetRectsGeometry {
         changes: Vec<RectGeometryChange>,
     },
+
+    BringForward(NodeId),
+    SendBackward(NodeId),
+
+    Delete {
+        rect: RectNode,
+        original_index: usize,
+    },
 }

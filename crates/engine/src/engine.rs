@@ -181,151 +181,11 @@ impl Engine {
                 } => {
                     self.hover_screen_px = Some(screen_px);
                     let world = self.camera.screen_to_world(screen_px);
-                    let mut start_marquee: Option<PendingMarquee> = None;
-                    let mut continue_marquee = false;
 
-                    let mut start_move: Option<PendingSelectionMove> = None;
-                    let mut continue_move = false;
-
-                    let mut start_resize: Option<PendingResize> = None;
-                    let mut continue_resize = false;
-
-                    let mut start_rect_create: Option<PendingRectCreate> = None;
-                    let mut continue_rect_create = false;
-
-                    match &self.drag_state {
-                        DragState::Idle => {}
-                        DragState::PendingMarquee(pending) => {
-                            let dx = screen_px.x - pending.start_screen_px.x;
-                            let dy = screen_px.y - pending.start_screen_px.y;
-                            let dist_sq = dx * dx + dy * dy;
-
-                            if dist_sq >= drag_threshold_sq {
-                                start_marquee = Some(*pending);
-                            }
-                        }
-                        DragState::Marquee(_) => {
-                            continue_marquee = true;
-                        }
-                        DragState::PendingSelectionMove(pending) => {
-                            let dx = screen_px.x - pending.start_screen_px.x;
-                            let dy = screen_px.y - pending.start_screen_px.y;
-                            let dist_sq = dx * dx + dy * dy;
-
-                            if dist_sq >= drag_threshold_sq {
-                                start_move = Some(pending.clone());
-                            }
-                        }
-                        DragState::SelectionMove(_) => {
-                            continue_move = true;
-                        }
-                        DragState::PendingResize(pending) => {
-                            let dx = screen_px.x - pending.start_screen_px.x;
-                            let dy = screen_px.y - pending.start_screen_px.y;
-                            let dist_sq = dx * dx + dy * dy;
-
-                            if dist_sq >= drag_threshold_sq {
-                                start_resize = Some(*pending);
-                            }
-                        }
-                        DragState::Resize(_) => {
-                            continue_resize = true;
-                        }
-                        DragState::PendingRectCreate(pending) => {
-                            let dx = screen_px.x - pending.start_screen_px.x;
-                            let dy = screen_px.y - pending.start_screen_px.y;
-                            let dist_sq = dx * dx + dy * dy;
-
-                            if dist_sq >= drag_threshold_sq {
-                                start_rect_create = Some(pending.clone());
-                            }
-                        }
-                        DragState::RectCreate(_) => {
-                            continue_rect_create = true;
-                        }
-                    }
-
-                    if let Some(pending) = start_resize {
-                        let rect_idx = self
-                            .doc
-                            .rects
-                            .iter()
-                            .position(|r| r.id == pending.handle.node_id)
-                            .unwrap();
-
-                        let rect = &self.doc.rects[rect_idx];
-
-                        self.drag_state = DragState::Resize(ResizeDrag {
-                            handle: pending.handle,
-                            start_world: pending.start_world,
-                            current_world: world,
-                            origin_pos: rect.pos,   // snapshot
-                            origin_size: rect.size, // snapshot
-                            rect_idx,
-                        });
-
-                        self.apply_selection_resize()
-                    } else if continue_resize {
-                        if let DragState::Resize(drag) = &mut self.drag_state {
-                            drag.current_world = world;
-                        }
-                        self.apply_selection_resize();
-                    }
-
-                    if let Some(pending) = start_marquee {
-                        self.drag_state = DragState::Marquee(MarqueeDrag {
-                            start_world: pending.start_world,
-                            current_world: world,
-                            additive: pending.additive,
-                        });
-
-                        self.update_marquee(
-                            Some(pending.start_world),
-                            Some(world),
-                            pending.additive,
-                        );
-                    } else if continue_marquee {
-                        self.update_marquee(None, Some(world), false);
-                    }
-
-                    if let Some(pending) = start_move {
-                        let selected_ids: HashSet<NodeId> = self.selected.iter().copied().collect();
-                        let origins: Vec<(NodeId, Vec2)> = self
-                            .doc
-                            .rects
-                            .iter()
-                            .filter_map(|rect| {
-                                selected_ids
-                                    .contains(&rect.id)
-                                    .then_some((rect.id, rect.pos))
-                            })
-                            .collect();
-
-                        self.drag_state = DragState::SelectionMove(SelectionDrag {
-                            start_world: pending.start_world,
-                            current_world: world,
-                            origins,
-                        });
-
-                        self.apply_selection_drag();
-                    } else if continue_move {
-                        if let DragState::SelectionMove(drag) = &mut self.drag_state {
-                            drag.current_world = world;
-                        }
-                        self.apply_selection_drag();
-                    }
-
-                    if let Some(pending) = start_rect_create {
-                        self.drag_state = DragState::RectCreate(RectCreateDrag {
-                            start_world: pending.start_world,
-                            current_world: world,
-                            previous_selection: pending.previous_selection.clone(),
-                        });
-                    } else if continue_rect_create
-                        && let DragState::RectCreate(drag) = &mut self.drag_state
-                    {
-                        drag.current_world = world;
-                    }
+                    self.update_marquee_drag(screen_px, world, drag_threshold_sq);
+                    self.update_move_drag(screen_px, world, drag_threshold_sq);
+                    self.update_resize_drag(screen_px, world, drag_threshold_sq);
+                    self.update_rect_create_drag(screen_px, world, drag_threshold_sq);
                 }
                 InputEvent::PointerUp {
                     screen_px,
@@ -334,7 +194,7 @@ impl Engine {
                     let world = self.camera.screen_to_world(screen_px);
 
                     if matches!(self.drag_state, DragState::Marquee(_)) {
-                        self.update_marquee(None, Some(world), false);
+                        self.update_marquee_drag(screen_px, world, drag_threshold_sq);
                     }
 
                     let drag_state = std::mem::replace(&mut self.drag_state, DragState::Idle);
@@ -443,6 +303,37 @@ impl Engine {
             render_scene,
             overlay_scene,
             cursor,
+        }
+    }
+
+    pub fn update_marquee_drag(&mut self, screen_px: Vec2, world: Vec2, threshold_sq: f32) {
+        let next: Option<DragState> = match &self.drag_state {
+            DragState::PendingMarquee(pending) => {
+                let dx = screen_px.x - pending.start_screen_px.x;
+                let dy = screen_px.y - pending.start_screen_px.y;
+                let dist_sq = dx * dx + dy * dy;
+
+                if dist_sq >= threshold_sq {
+                    Some(DragState::Marquee(MarqueeDrag {
+                        start_world: pending.start_world,
+                        current_world: world,
+                        additive: pending.additive,
+                    }))
+                } else {
+                    None
+                }
+            }
+            DragState::Marquee(d) => {
+                let mut d = d.clone();
+                d.current_world = world;
+                Some(DragState::Marquee(d))
+            }
+            _ => None,
+        };
+
+        if let Some(state) = next {
+            self.drag_state = state;
+            self.update_marquee_selection();
         }
     }
 
@@ -639,29 +530,10 @@ impl Engine {
     }
 
     /// Update marquee selection bounds and recompute the selected set.
-    fn update_marquee(
-        &mut self,
-        start_world: Option<Vec2>,
-        current_world: Option<Vec2>,
-        additive: bool,
-    ) {
-        if let Some(sw) = start_world {
-            let cw = current_world.unwrap_or(sw);
-            self.drag_state = DragState::Marquee(MarqueeDrag {
-                start_world: sw,
-                current_world: cw,
-                additive,
-            });
-            return;
-        }
-
+    fn update_marquee_selection(&mut self) {
         let DragState::Marquee(drag) = &mut self.drag_state else {
             return;
         };
-
-        if let Some(cw) = current_world {
-            drag.current_world = cw;
-        }
 
         let min_x = drag.start_world.x.min(drag.current_world.x);
         let min_y = drag.start_world.y.min(drag.current_world.y);
@@ -695,17 +567,17 @@ impl Engine {
 
     /// Update rect positions when `DragState` is `SelectionMove`.
     fn apply_selection_drag(&mut self) {
-        let (doc, drag_state) = (&mut self.doc, &self.drag_state);
-
-        let DragState::SelectionMove(drag) = drag_state else {
-            return;
+        let (dx, dy, origins) = match &self.drag_state {
+            DragState::SelectionMove(drag) => (
+                drag.current_world.x - drag.start_world.x,
+                drag.current_world.y - drag.start_world.y,
+                drag.origins.clone(),
+            ),
+            _ => return,
         };
 
-        let dx = drag.current_world.x - drag.start_world.x;
-        let dy = drag.current_world.y - drag.start_world.y;
-
-        for (node_id, origin) in &drag.origins {
-            if let Some(rect) = doc.rects.iter_mut().find(|rect| rect.id == *node_id) {
+        for (node_id, origin) in &origins {
+            if let Some(rect) = self.doc.rects.iter_mut().find(|rect| rect.id == *node_id) {
                 rect.pos.x = origin.x + dx;
                 rect.pos.y = origin.y + dy;
             }
@@ -756,6 +628,18 @@ impl Engine {
                         rect.size = geometry.size;
                     }
                 }
+            }
+            ToolCommand::BringForward(node_id) => {
+                todo!()
+            }
+            ToolCommand::SendBackward(node_id) => {
+                todo!()
+            }
+            ToolCommand::Delete {
+                rect,
+                original_index,
+            } => {
+                todo!()
             }
         }
     }
@@ -842,101 +726,68 @@ impl Engine {
     }
 
     fn apply_selection_resize(&mut self) {
-        let DragState::Resize(drag) = &self.drag_state else {
-            return;
+        let (corner, rect_idx, dx, dy, origin_pos, origin_size) = match &self.drag_state {
+            DragState::Resize(d) => (
+                d.handle.corner,
+                d.rect_idx,
+                d.current_world.x - d.start_world.x,
+                d.current_world.y - d.start_world.y,
+                d.origin_pos,
+                d.origin_size,
+            ),
+            _ => return,
         };
+
         let min_size = 1.0_f32;
+        let (new_pos, new_size) = Self::compute_resize(corner, dx, dy, origin_pos, origin_size, min_size);
 
-        let dx = drag.current_world.x - drag.start_world.x;
-        let dy = drag.current_world.y - drag.start_world.y;
-
-        if let Some(rect) = self.doc.rects.get_mut(drag.rect_idx) {
-            match drag.handle.corner {
-                Corner::TL => {
-                    // dx
-                    let mut new_size_x: f32;
-                    let mut new_pos_x: f32;
-
-                    new_pos_x = drag.origin_pos.x + dx;
-                    new_size_x = drag.origin_size.x - dx;
-
-                    if new_size_x < min_size {
-                        new_size_x = min_size;
-                        new_pos_x = drag.origin_pos.x + drag.origin_size.x - min_size
-                        // pin right edge
-                    }
-
-                    rect.pos.x = new_pos_x;
-                    rect.size.x = new_size_x;
-
-                    // dy
-                    let mut new_size_y: f32;
-                    let mut new_pos_y: f32;
-
-                    new_pos_y = drag.origin_pos.y + dy;
-                    new_size_y = drag.origin_size.y - dy;
-
-                    if new_size_y < min_size {
-                        new_size_y = min_size;
-                        new_pos_y = drag.origin_pos.y + drag.origin_size.y - min_size
-                        // pin bottom edge
-                    }
-
-                    rect.pos.y = new_pos_y;
-                    rect.size.y = new_size_y;
-                }
-                Corner::TR => {
-                    // x: right edge moves — pos.x fixed, size.x grows/shrinks
-                    let mut new_size_x = drag.origin_size.x + dx;
-                    if new_size_x < min_size {
-                        new_size_x = min_size;
-                    }
-                    rect.size.x = new_size_x;
-
-                    // y: top edge moves — anchor is bottom edge
-                    let mut new_pos_y = drag.origin_pos.y + dy;
-                    let mut new_size_y = drag.origin_size.y - dy;
-                    if new_size_y < min_size {
-                        new_size_y = min_size;
-                        new_pos_y = drag.origin_pos.y + drag.origin_size.y - min_size;
-                    }
-                    rect.pos.y = new_pos_y;
-                    rect.size.y = new_size_y;
-                }
-                Corner::BL => {
-                    // x: left edge moves — anchor is right edge
-                    let mut new_pos_x = drag.origin_pos.x + dx;
-                    let mut new_size_x = drag.origin_size.x - dx;
-                    if new_size_x < min_size {
-                        new_size_x = min_size;
-                        new_pos_x = drag.origin_pos.x + drag.origin_size.x - min_size;
-                    }
-                    rect.pos.x = new_pos_x;
-                    rect.size.x = new_size_x;
-
-                    // y: bottom edge moves — pos.y fixed, size.y grows/shrinks
-                    let mut new_size_y = drag.origin_size.y + dy;
-                    if new_size_y < min_size {
-                        new_size_y = min_size;
-                    }
-                    rect.size.y = new_size_y;
-                }
-                Corner::BR => {
-                    // Both right and bottom edges move — pos unchanged, only size changes
-                    let mut new_size_x = drag.origin_size.x + dx;
-                    if new_size_x < min_size {
-                        new_size_x = min_size;
-                    }
-                    rect.size.x = new_size_x;
-
-                    let mut new_size_y = drag.origin_size.y + dy;
-                    if new_size_y < min_size {
-                        new_size_y = min_size;
-                    }
-                    rect.size.y = new_size_y;
-                }
-            }
+        if let Some(rect) = self.doc.rects.get_mut(rect_idx) {
+            rect.pos = new_pos;
+            rect.size = new_size;
         }
+    }
+
+    fn compute_resize(
+        corner: Corner,
+        dx: f32,
+        dy: f32,
+        origin_pos: Vec2,
+        origin_size: Vec2,
+        min_size: f32,
+    ) -> (Vec2, Vec2) {
+        let mut pos = origin_pos;
+        let mut size = origin_size;
+
+        // Helper: clamp one axis. Returns (new_origin, new_size).
+        // If the dragged edge would pass the opposite edge, pin at min_size.
+        let clamp_axis = |origin: f32, length: f32, delta: f32, anchor_end: bool| -> (f32, f32) {
+            if anchor_end {
+                // Right/bottom edge moves — origin stays, size changes
+                let new_len = (length + delta).max(min_size);
+                (origin, new_len)
+            } else {
+                // Left/top edge moves — origin shifts, size shrinks
+                let mut new_origin = origin + delta;
+                let mut new_len = length - delta;
+                if new_len < min_size {
+                    new_len = min_size;
+                    new_origin = origin + length - min_size;
+                }
+                (new_origin, new_len)
+            }
+        };
+
+        let anchor_left = matches!(corner, Corner::TR | Corner::BR);
+        let anchor_top = matches!(corner, Corner::BL | Corner::BR);
+
+        let (px, sx) = clamp_axis(origin_pos.x, origin_size.x, dx, anchor_left);
+        let (py, sy) = clamp_axis(origin_pos.y, origin_size.y, dy, anchor_top);
+        pos.x = px;
+        pos.y = py;
+        size.x = sx;
+        size.y = sy;
+
+        (pos, size)
     }
 
     /// Determine the cursor style to show based on current hover position and drag state.
@@ -971,6 +822,122 @@ impl Engine {
         }
 
         CursorStyle::Default
+    }
+
+    fn update_move_drag(&mut self, screen_px: Vec2, world: Vec2, drag_threshold_sq: f32) {
+        let next: Option<DragState> = match &self.drag_state {
+            DragState::PendingSelectionMove(pending) => {
+                let dx = screen_px.x - pending.start_screen_px.x;
+                let dy = screen_px.y - pending.start_screen_px.y;
+                let dist_sq = dx * dx + dy * dy;
+
+                if dist_sq >= drag_threshold_sq {
+                    let selected_ids: HashSet<NodeId> = self.selected.iter().copied().collect();
+                    let origins: Vec<(NodeId, Vec2)> = self
+                        .doc
+                        .rects
+                        .iter()
+                        .filter_map(|rect| {
+                            selected_ids
+                                .contains(&rect.id)
+                                .then_some((rect.id, rect.pos))
+                        })
+                        .collect();
+
+                    Some(DragState::SelectionMove(SelectionDrag {
+                        start_world: pending.start_world,
+                        current_world: world,
+                        origins,
+                    }))
+                } else {
+                    None
+                }
+            }
+            DragState::SelectionMove(d) => {
+                let mut d = d.clone();
+                d.current_world = world;
+                Some(DragState::SelectionMove(d))
+            }
+            _ => None,
+        };
+
+        if let Some(state) = next {
+            self.drag_state = state;
+            self.apply_selection_drag();
+        }
+    }
+
+    fn update_resize_drag(&mut self, screen_px: Vec2, world: Vec2, drag_threshold_sq: f32) {
+        let next: Option<DragState> = match &self.drag_state {
+            DragState::PendingResize(pending) => {
+                let dx = screen_px.x - pending.start_screen_px.x;
+                let dy = screen_px.y - pending.start_screen_px.y;
+                let dist_sq = dx * dx + dy * dy;
+
+                if dist_sq >= drag_threshold_sq {
+                    let rect_idx = self
+                        .doc
+                        .rects
+                        .iter()
+                        .position(|r| r.id == pending.handle.node_id)
+                        .unwrap();
+
+                    let rect = &self.doc.rects[rect_idx];
+
+                    Some(DragState::Resize(ResizeDrag {
+                        handle: pending.handle,
+                        start_world: pending.start_world,
+                        current_world: world,
+                        origin_pos: rect.pos,   // snapshot
+                        origin_size: rect.size, // snapshot
+                        rect_idx,
+                    }))
+                } else {
+                    None
+                }
+            }
+            DragState::Resize(drag) => {
+                let mut drag = drag.clone();
+                drag.current_world = world;
+                Some(DragState::Resize(drag))
+            }
+            _ => None,
+        };
+
+        if let Some(state) = next {
+            self.drag_state = state;
+            self.apply_selection_resize();
+        }
+    }
+
+    fn update_rect_create_drag(&mut self, screen_px: Vec2, world: Vec2, drag_threshold_sq: f32) {
+        let next: Option<DragState> = match &self.drag_state {
+            DragState::PendingRectCreate(pending) => {
+                let dx = screen_px.x - pending.start_screen_px.x;
+                let dy = screen_px.y - pending.start_screen_px.y;
+                let dist_sq = dx * dx + dy * dy;
+
+                if dist_sq >= drag_threshold_sq {
+                    Some(DragState::RectCreate(RectCreateDrag {
+                        start_world: pending.start_world,
+                        current_world: world,
+                        previous_selection: pending.previous_selection.clone(),
+                    }))
+                } else {
+                    None
+                }
+            }
+            DragState::RectCreate(drag) => {
+                let mut drag = drag.clone();
+                drag.current_world = world;
+                Some(DragState::RectCreate(drag))
+            }
+            _ => None,
+        };
+
+        if let Some(state) = next {
+            self.drag_state = state;
+        }
     }
 }
 
