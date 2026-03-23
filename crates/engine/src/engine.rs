@@ -630,16 +630,31 @@ impl Engine {
                 }
             }
             ToolCommand::BringForward(node_id) => {
-                todo!()
+                let idx = self.doc.rects.iter().position(|rect| rect.id == *node_id);
+                if let Some(idx) = idx
+                    && idx < self.doc.rects.len() - 1
+                {
+                    self.doc.rects.swap(idx, idx + 1);
+                }
             }
             ToolCommand::SendBackward(node_id) => {
-                todo!()
+                let idx = self.doc.rects.iter().position(|rect| rect.id == *node_id);
+
+                if let Some(idx) = idx
+                    && idx > 0
+                {
+                    self.doc.rects.swap(idx, idx - 1);
+                }
             }
-            ToolCommand::Delete {
-                rect,
-                original_index,
-            } => {
-                todo!()
+            ToolCommand::Delete { rects } => {
+                if forward {
+                    let selected_ids: HashSet<NodeId> = self.selected.iter().copied().collect();
+                    self.doc
+                        .rects
+                        .retain(|rect| !selected_ids.contains(&rect.id));
+                } else {
+                    todo!();
+                }
             }
         }
     }
@@ -739,7 +754,8 @@ impl Engine {
         };
 
         let min_size = 1.0_f32;
-        let (new_pos, new_size) = Self::compute_resize(corner, dx, dy, origin_pos, origin_size, min_size);
+        let (new_pos, new_size) =
+            Self::compute_resize(corner, dx, dy, origin_pos, origin_size, min_size);
 
         if let Some(rect) = self.doc.rects.get_mut(rect_idx) {
             rect.pos = new_pos;

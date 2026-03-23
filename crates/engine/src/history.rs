@@ -39,7 +39,6 @@ pub enum ToolCommand {
     SendBackward(NodeId),
 
     Delete {
-        rect: RectNode,
-        original_index: usize,
+        rects: Vec<(RectNode, usize)>, // (rect, original_index) pairs
     },
 }
