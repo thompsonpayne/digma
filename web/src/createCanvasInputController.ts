@@ -49,6 +49,7 @@ export function createCanvasInputController(
   let batch: InputBatch | null = null;
   let interaction: InteractionState = IDLE_INTERACTION;
   let spaceDown = false;
+  let pendingToolReset: ToolModeValue | null = null;
 
   const getBatch = (): InputBatch | null => batch;
 
@@ -67,6 +68,12 @@ export function createCanvasInputController(
   const clearBatchEvents = (): void => {
     if (batch) {
       batch.events.length = 0;
+    }
+
+    if (pendingToolReset) {
+      const nextTool = pendingToolReset;
+      pendingToolReset = null;
+      options.onToolChange(nextTool);
     }
   };
 
@@ -89,6 +96,21 @@ export function createCanvasInputController(
         if (event.code === "Space") {
           spaceDown = true;
           event.preventDefault();
+        }
+
+        const isPrimaryModifer = event.metaKey || event.ctrlKey;
+        const key = event.key.toLowerCase();
+
+        if (isPrimaryModifer && key === "z") {
+          pushEvent({ type: event.shiftKey ? "redo" : "undo" });
+          event.preventDefault();
+          return;
+        }
+
+        if (isPrimaryModifer && key === "y") {
+          pushEvent({ type: "redo" });
+          event.preventDefault();
+          return;
         }
       },
       { signal: abortController.signal },
@@ -195,7 +217,8 @@ export function createCanvasInputController(
           interaction = IDLE_INTERACTION;
 
           if (finishedInteraction.kind === "rectCreating") {
-            options.onToolChange(ToolMode.select);
+            pendingToolReset = ToolMode.select;
+            // options.onToolChange(ToolMode.select);
           }
 
           releasePointerCapture(canvas, finishedInteraction.pointerId);
@@ -226,6 +249,9 @@ export function createCanvasInputController(
           const cancelledInteraction = interaction;
           interaction = IDLE_INTERACTION;
 
+          if (cancelledInteraction.kind === "rectCreating") {
+            pendingToolReset = ToolMode.select;
+          }
           releasePointerCapture(canvas, cancelledInteraction.pointerId);
           batch.events.push({ type: "pointer_cancel" });
         }

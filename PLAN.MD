@@ -138,7 +138,7 @@ Deliverable: selection feels reliable.
 - Rectangle tool (drag to create).
 - Move selection (drag).
 - Resize handles (scale).
-- Inspector edits for x/y/w/h, fill/stroke.
+- Basic style edits from the toolbar (fill color today; full inspector deferred).
 
 Deliverable: basic drawing + editing workflow.
 
@@ -223,12 +223,16 @@ Pick 1-2:
 - Cursor behavior expanded for drawing/panning UX: rect creation shows a crosshair, while the frontend resolves grab / grabbing during space-pan interactions.
 - Web app runtime split into focused frontend modules (`App`, `createCanvasInputController`, `createWasmApp`, `editorTypes`) instead of a monolithic entry flow.
 - Tailwind CSS is now wired into the Vite frontend, and the app has a basic editor shell with header, toolbar, and framed canvas workspace.
-- Inspector-driven fill editing is now wired end-to-end: the SolidJS inspector uses a native color picker, converts hex to RGBA, and enqueues a semantic `set_selection_fill` batch event.
-- The engine now applies `set_selection_fill` to the current selection by mutating selected rect colors in the document, and render scene generation reflects the updated fill state.
+- Toolbar fill color editing added; selected rectangles can now be recolored from the frontend.
 - Frontend test setup added with Vitest + Solid Testing Library; smoke tests now cover app boot rendering and rectangle tool switching.
+- Command history module added in `engine` (`history.rs`) with gesture-level commands for rect creation and rect geometry edits (`CreateRect`, `SetRectsGeometry`).
+- Rectangle create / move / resize now finalize through the command system: create commits a `CreateRect` command, while move and resize capture before/after geometry and push a single history entry on pointer release.
+- Engine now maintains undo/redo stacks and handles `InputEvent::Undo` / `InputEvent::Redo`, including redo invalidation on new edits.
+- Drag-state snapshots were upgraded to carry stable IDs and prior selection where needed, keeping move/resize/create history tied to `NodeId` rather than transient rect indices.
+- Pointer cancel now rolls active move/resize gestures back to their drag-start snapshot instead of silently leaving partial edits in the document.
+- Frontend input types and canvas controller now emit undo/redo shortcut events and defer the post-rectangle auto-switch back to Select until after the current input batch is flushed.
 - Verified status: `cargo test -p engine` passes (19 tests), and `pnpm -C web test:run` passes.
 
 ## Next Implementation Step
 
-- Inspector panel: add editable `x/y/w/h` plus stroke controls for the current selection (Week 4).
-- Route rect create / move / resize through the command system so undo/redo can cover the core editing workflow.
+- Layers + ordering: implement a selection-synced layers list and undoable bring-forward / send-backward / delete commands, using `Document.rects` order as the single source of truth (Week 5).
