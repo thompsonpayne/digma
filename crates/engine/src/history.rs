@@ -15,14 +15,14 @@ impl RectGeometry {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct RectGeometryChange {
     pub id: NodeId,
     pub before: RectGeometry,
     pub after: RectGeometry,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ToolCommand {
     CreateRect {
         rect: RectNode,
@@ -40,5 +40,7 @@ pub enum ToolCommand {
 
     Delete {
         rects: Vec<(RectNode, usize)>, // (rect, original_index) pairs
+        previous_selection: Vec<NodeId>,
+        next_selection: Vec<NodeId>,
     },
 }

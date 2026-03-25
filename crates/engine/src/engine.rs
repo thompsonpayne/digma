@@ -279,6 +279,15 @@ impl Engine {
                 InputEvent::Redo => {
                     self.redo();
                 }
+                InputEvent::BringForward(node_id) => {
+                    let command = ToolCommand::BringForward(node_id);
+                    self.apply_command(&command, true);
+                    self.push_history(command);
+                }
+                InputEvent::SendBackward(node_id) => {
+                    self.apply_command(&ToolCommand::SendBackward(node_id), true);
+                }
+                InputEvent::DeleteSelected => todo!(),
             }
         }
 
@@ -646,14 +655,30 @@ impl Engine {
                     self.doc.rects.swap(idx, idx - 1);
                 }
             }
-            ToolCommand::Delete { rects } => {
+            ToolCommand::Delete {
+                rects,
+                previous_selection,
+                next_selection,
+            } => {
+                let deleted_ids: HashSet<NodeId> = rects.iter().map(|r| r.0.id).collect();
                 if forward {
-                    let selected_ids: HashSet<NodeId> = self.selected.iter().copied().collect();
                     self.doc
                         .rects
-                        .retain(|rect| !selected_ids.contains(&rect.id));
+                        .retain(|rect| !deleted_ids.contains(&rect.id));
+                    self.selected.retain(|id| !deleted_ids.contains(id));
+
+                    self.selected = next_selection.clone();
                 } else {
-                    todo!();
+                    let mut restored = rects.clone();
+                    restored.sort_by_key(|(_, original_index)| *original_index);
+
+                    for (rect, original_index) in restored {
+                        if self.rect_index(rect.id).is_none() {
+                            let insert_at = original_index.min(self.doc.rects.len());
+                            self.doc.rects.insert(insert_at, rect);
+                        }
+                    }
+                    self.selected = previous_selection.clone();
                 }
             }
         }

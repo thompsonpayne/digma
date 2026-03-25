@@ -15,7 +15,7 @@ impl Vec2 {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct RectNode {
     pub id: NodeId,
     pub pos: Vec2,
