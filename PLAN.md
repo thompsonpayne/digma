@@ -1,5 +1,34 @@
 # Figma-Clone (Rust Engine + WebGPU) Plan (6-8 Weeks)
 
+<!--toc:start-->
+
+- [Figma-Clone (Rust Engine + WebGPU) Plan (6-8 Weeks)](#figma-clone-rust-engine-webgpu-plan-6-8-weeks)
+  - [Architecture](#architecture)
+    - [Crates / Modules](#crates-modules)
+    - [Core design choices](#core-design-choices)
+  - [Data Model (MVP)](#data-model-mvp)
+    - [Node types](#node-types)
+    - [Viewport / camera](#viewport-camera)
+  - [Rendering](#rendering)
+    - [WebGPU primitives (MVP)](#webgpu-primitives-mvp)
+    - [Overlay pass](#overlay-pass)
+  - [DOM Text Overlay](#dom-text-overlay)
+    - [Rationale](#rationale)
+    - [Approach](#approach)
+  - [Weekly Milestones (6-8 weeks)](#weekly-milestones-6-8-weeks)
+    - [Week 1: Boot + Render Loop](#week-1-boot-render-loop)
+    - [Week 2: Document + Commands + Persistence](#week-2-document-commands-persistence)
+    - [Week 3: Hit Testing + Selection](#week-3-hit-testing-selection)
+    - [Week 4: Tools + Transforms](#week-4-tools-transforms)
+    - [Week 5: Layers + Ordering + Snapping](#week-5-layers-ordering-snapping)
+    - [Week 6: Text Nodes (DOM Overlay) + Export](#week-6-text-nodes-dom-overlay-export)
+    - [Weeks 7-8 (optional polish)](#weeks-7-8-optional-polish)
+  - [Acceptance Criteria for MVP](#acceptance-criteria-for-mvp)
+  - [Risks / Mitigations](#risks-mitigations)
+  - [Current Progress (as of Mar 8, 2026)](#current-progress-as-of-mar-8-2026)
+  - [Next Implementation Step](#next-implementation-step)
+  <!--toc:end-->
+
 Goal: a usable single-user vector editor demo with a Rust core engine (WASM) and a WebGPU renderer, plus a DOM-based text overlay (no GPU text in MVP).
 
 Non-goals (MVP): real-time collaboration, constraints/auto-layout, components/variants, boolean ops, full SVG fidelity.
@@ -115,7 +144,6 @@ Notes:
 - Render a handful of hardcoded rect instances.
 
 Deliverable: "blank canvas" app that feels smooth.
-
 
 ### Week 2: Document + Commands + Persistence
 
