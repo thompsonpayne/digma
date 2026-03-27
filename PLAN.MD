@@ -231,8 +231,10 @@ Pick 1-2:
 - Drag-state snapshots were upgraded to carry stable IDs and prior selection where needed, keeping move/resize/create history tied to `NodeId` rather than transient rect indices.
 - Pointer cancel now rolls active move/resize gestures back to their drag-start snapshot instead of silently leaving partial edits in the document.
 - Frontend input types and canvas controller now emit undo/redo shortcut events and defer the post-rectangle auto-switch back to Select until after the current input batch is flushed.
-- Verified status: `cargo test -p engine` passes (19 tests), and `pnpm -C web test:run` passes.
+- Layer ordering commands are now wired end-to-end: frontend toolbar actions emit `bring_forward` / `send_backward`, the engine records grouped reorder commands against the current selection, and undo/redo replays those commands from stored `NodeId` snapshots instead of transient selection state.
+- Delete-selected command support is now wired into the engine history model with stored rect/index snapshots plus selection snapshots for deterministic undo/redo.
+- Verified status: `cargo test -p engine` passes (19 tests), and `pnpm -C web build` passes.
 
 ## Next Implementation Step
 
-- Layers + ordering: implement a selection-synced layers list and undoable bring-forward / send-backward / delete commands, using `Document.rects` order as the single source of truth (Week 5).
+- Layers UI: implement a selection-synced layers list in the frontend, expose layer metadata from `EngineOutput`, and connect list interactions to the existing ordering/delete command path using `Document.rects` order as the single source of truth (Week 5).
