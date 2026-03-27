@@ -13,7 +13,7 @@ export const ToolMode = {
   rect: "rect",
 } as const;
 
-export type ToolMode = (typeof ToolMode)[keyof typeof ToolMode];
+export type ToolModeType = (typeof ToolMode)[keyof typeof ToolMode];
 
 export type InputEvent =
   | { type: "camera_pan_by_screen_delta"; delta_px: Point }
@@ -28,11 +28,14 @@ export type InputEvent =
   | { type: "pointer_cancel" }
   | { type: "set_selection_fill"; color: RgbaColor }
   | { type: "undo" }
-  | { type: "redo" };
+  | { type: "redo" }
+  | { type: "bring_forward" }
+  | { type: "send_backward" }
+  | { type: "delete_selected" };
 
 export type InputBatch = {
   events: InputEvent[];
-  tool: ToolMode;
+  tool: ToolModeType;
 };
 
 export type TickOutput = {

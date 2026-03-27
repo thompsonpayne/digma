@@ -279,15 +279,49 @@ impl Engine {
                 InputEvent::Redo => {
                     self.redo();
                 }
-                InputEvent::BringForward(node_id) => {
-                    let command = ToolCommand::BringForward(node_id);
+                InputEvent::BringForward => {
+                    if self.selected.is_empty() {
+                        continue;
+                    }
+
+                    let command = ToolCommand::BringForward(self.selected.clone());
                     self.apply_command(&command, true);
                     self.push_history(command);
                 }
-                InputEvent::SendBackward(node_id) => {
-                    self.apply_command(&ToolCommand::SendBackward(node_id), true);
+                InputEvent::SendBackward => {
+                    if self.selected.is_empty() {
+                        continue;
+                    }
+
+                    let command = ToolCommand::SendBackward(self.selected.clone());
+                    self.apply_command(&command, true);
+                    self.push_history(command);
                 }
-                InputEvent::DeleteSelected => todo!(),
+                InputEvent::DeleteSelected => {
+                    let selected_ids: HashSet<NodeId> = self.selected.iter().copied().collect();
+                    let rects: Vec<(RectNode, usize)> = self
+                        .doc
+                        .rects
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, rect)| {
+                            selected_ids.contains(&rect.id).then_some((*rect, idx))
+                        })
+                        .collect();
+
+                    if rects.is_empty() {
+                        continue;
+                    }
+
+                    let command = ToolCommand::Delete {
+                        rects,
+                        previous_selection: self.selected.clone(),
+                        next_selection: Vec::new(),
+                    };
+
+                    self.apply_command(&command, true);
+                    self.push_history(command);
+                }
             }
         }
 
@@ -619,7 +653,7 @@ impl Engine {
             } => {
                 if forward {
                     if self.rect_index(rect.id).is_none() {
-                        self.doc.rects.push(rect.clone());
+                        self.doc.rects.push(*rect);
                     }
                     self.selected = next_selection.clone();
                 } else {
@@ -638,22 +672,11 @@ impl Engine {
                     }
                 }
             }
-            ToolCommand::BringForward(node_id) => {
-                let idx = self.doc.rects.iter().position(|rect| rect.id == *node_id);
-                if let Some(idx) = idx
-                    && idx < self.doc.rects.len() - 1
-                {
-                    self.doc.rects.swap(idx, idx + 1);
-                }
+            ToolCommand::BringForward(node_ids) => {
+                self.reorder_selected(node_ids, forward);
             }
-            ToolCommand::SendBackward(node_id) => {
-                let idx = self.doc.rects.iter().position(|rect| rect.id == *node_id);
-
-                if let Some(idx) = idx
-                    && idx > 0
-                {
-                    self.doc.rects.swap(idx, idx - 1);
-                }
+            ToolCommand::SendBackward(node_ids) => {
+                self.reorder_selected(node_ids, !forward);
             }
             ToolCommand::Delete {
                 rects,
@@ -978,6 +1001,40 @@ impl Engine {
 
         if let Some(state) = next {
             self.drag_state = state;
+        }
+    }
+
+    fn reorder_selected(&mut self, node_ids: &[NodeId], to_front: bool) {
+        let selected_ids: HashSet<NodeId> = node_ids.iter().copied().collect();
+        let mut indices: Vec<usize> = selected_ids
+            .iter()
+            .filter_map(|id| self.rect_index(*id))
+            .collect();
+
+        if to_front {
+            indices.sort_unstable_by(|a, b| b.cmp(a));
+
+            for idx in indices {
+                if idx + 1 >= self.doc.rects.len() {
+                    continue;
+                }
+                if selected_ids.contains(&self.doc.rects[idx + 1].id) {
+                    continue;
+                }
+                self.doc.rects.swap(idx, idx + 1);
+            }
+        } else {
+            indices.sort_unstable();
+
+            for idx in indices {
+                if idx == 0 {
+                    continue;
+                }
+                if selected_ids.contains(&self.doc.rects[idx - 1].id) {
+                    continue;
+                }
+                self.doc.rects.swap(idx, idx - 1);
+            }
         }
     }
 }

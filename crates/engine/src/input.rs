@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::NodeId;
 use crate::camera::Camera;
 use crate::render_scene::{OverlayScene, RenderScene};
 use crate::types::Vec2;
@@ -41,8 +40,8 @@ pub enum InputEvent {
     },
     Undo,
     Redo,
-    BringForward(NodeId),
-    SendBackward(NodeId),
+    BringForward,
+    SendBackward,
     DeleteSelected,
 }
 

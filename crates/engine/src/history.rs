@@ -35,12 +35,12 @@ pub enum ToolCommand {
         changes: Vec<RectGeometryChange>,
     },
 
-    BringForward(NodeId),
-    SendBackward(NodeId),
+    BringForward(Vec<NodeId>),
+    SendBackward(Vec<NodeId>),
 
     Delete {
-        rects: Vec<(RectNode, usize)>, // (rect, original_index) pairs
-        previous_selection: Vec<NodeId>,
-        next_selection: Vec<NodeId>,
+        rects: Vec<(RectNode, usize)>,   // (rect, original_index) pairs
+        previous_selection: Vec<NodeId>, // what self.selected was before applying delete
+        next_selection: Vec<NodeId>,     // what self.selected should be after applying delete
     },
 }

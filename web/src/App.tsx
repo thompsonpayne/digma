@@ -2,7 +2,7 @@ import { createMemo, createSignal, Show } from "solid-js";
 
 import { createCanvasInputController } from "./createCanvasInputController";
 import { createWasmApp } from "./createWasmApp";
-import type { InputEvent, ToolMode as ToolModeValue } from "./editorTypes";
+import type { InputEvent, ToolModeType as ToolModeValue } from "./editorTypes";
 import { ToolMode } from "./editorTypes";
 import { hexToRgbaColor } from "./utils";
 
@@ -60,6 +60,14 @@ function App() {
     } as InputEvent);
   };
 
+  const handleSendForward = () => {
+    input.pushEvent({ type: "bring_forward" });
+  };
+
+  const handleSendBackward = () => {
+    input.pushEvent({ type: "send_backward" });
+  };
+
   return (
     <div class="min-h-screen bg-stone-100 px-4 py-6 text-stone-900 sm:px-6">
       <div class="mx-auto flex max-w-6xl flex-col gap-4">
@@ -81,9 +89,9 @@ function App() {
           <button
             type="button"
             onClick={() => selectTool(ToolMode.select)}
-            class={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+            class={`btn btn-sm ${
               toolMode() === ToolMode.select
-                ? "border-stone-900 bg-stone-900 text-white"
+                ? "border-amber-600 bg-amber-500 text-white"
                 : "border-stone-300 bg-stone-50 text-stone-700 hover:border-stone-400 hover:bg-stone-100"
             }`}
           >
@@ -92,7 +100,7 @@ function App() {
           <button
             type="button"
             onClick={() => selectTool(ToolMode.rect)}
-            class={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+            class={`btn btn-sm ${
               toolMode() === ToolMode.rect
                 ? "border-amber-600 bg-amber-500 text-white"
                 : "border-stone-300 bg-stone-50 text-stone-700 hover:border-stone-400 hover:bg-stone-100"
@@ -127,6 +135,17 @@ function App() {
               </span>
             </div>
           </Show>
+
+          <div class="flex items-center">
+            <button class="btn btn-sm btn-primary" onClick={handleSendForward}>
+              Send forward
+            </button>
+          </div>
+          <div class="flex items-center">
+            <button class="btn btn-sm btn-primary" onClick={handleSendBackward}>
+              Send backward
+            </button>
+          </div>
         </div>
 
         <div class="overflow-hidden rounded-3xl border border-stone-300 bg-white p-3 shadow-lg shadow-stone-300/40">
