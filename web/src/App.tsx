@@ -137,8 +137,11 @@ function App() {
           </Show>
 
           <div class="flex items-center">
-            <button class="btn btn-sm btn-primary" onClick={handleSendForward}>
-              Send forward
+            <button
+              class="btn btn-sm btn-secondary"
+              onClick={handleSendForward}
+            >
+              Bring forward
             </button>
           </div>
           <div class="flex items-center">
