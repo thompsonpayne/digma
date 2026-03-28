@@ -46,7 +46,7 @@ If we do not separate these concerns early, later multiplayer work will force a 
 
 - replay document operations on another client
 - apply remote operations without disturbing local UI state
-- make the backend authoritative for ordering
+- make the back-end authoritative for ordering
 
 ### 2. Input handling and document mutation are tightly combined
 
@@ -58,7 +58,7 @@ If we do not separate these concerns early, later multiplayer work will force a 
 - maintains local undo/redo
 - produces render output
 
-For realtime collaboration, document mutation must become more explicit and serializable.
+For real-time collaboration, document mutation must become more explicit and serializable.
 
 ### 3. Commands are close to collaboration ops, but not quite there
 
@@ -228,11 +228,74 @@ The app should keep working as a local editor while the architecture is being sp
 
 ## Proposed Phases
 
+## Current Progress
+
+Status as of 2026-03-29:
+
+- Phase 1: in progress (near completion)
+- Phase 2: not started
+- Phase 3: not started
+- Phase 4: not started
+- Phase 5: not started
+- Phase 6: not started
+
 ## Phase 1 - Separate Shared Document State from Local Session State
 
 ### Objective
 
 Split `Engine` into two conceptual parts without changing visible behavior.
+
+### Current status
+
+In progress — nearing completion. Most local interaction logic has been extracted to `EditorSession` in `session.rs`. The remaining work is deciding whether to extract a few read-only helpers (`compute_cursor`, overlay construction) or to move forward to Phase 2.
+
+Completed so far:
+
+- Introduced `DocumentModel` in `types.rs` and kept `Document` as a compatibility alias
+- Introduced `EditorSession` in `session.rs`
+- Changed `Engine` into a composition root that owns `document: DocumentModel` and `session: EditorSession`
+- Kept undo/redo on `Engine` for now, matching the Phase 1 goal of boundary cleanup without redesigning history yet
+- Moved document-only helpers onto `DocumentModel`:
+  - `alloc_id()`
+  - `check_collide_rects()`
+  - `rect_index()`
+  - `rect()`
+  - `rect_mut()`
+  - `reorder_selected()`
+- Moved local selection policy onto `EditorSession` with `apply_selection()`
+- Moved the local pointer interaction entry points onto `EditorSession`:
+  - `pointer_down()`
+  - `pointer_move()`
+  - `pointer_cancel()`
+- Moved local interaction and preview helpers onto `EditorSession`:
+  - `check_collide_handle()`
+  - `update_marquee_drag()`
+  - `update_marquee_selection()`
+  - `update_move_drag()`
+  - `apply_selection_drag()`
+  - `update_resize_drag()`
+  - `apply_selection_resize()`
+  - `update_rect_create_drag()`
+  - `rollback_active_drag()`
+- Moved pure resize math into `drag.rs` as `compute_resize()`
+- Verified current behavior still passes the engine test suite with `cargo test -p engine`
+
+Still remaining in Phase 1:
+
+- Optional: extract the remaining read-only interaction helpers from `Engine`, most notably:
+  - `compute_cursor()` — read-only cursor style computation
+  - overlay construction — read-only scene construction for selection, marquee, and rect-create previews
+- If extracting these is not immediately necessary, it is reasonable to move forward to Phase 2 and extract them later if needed
+- Keep `PointerUp` commit handling in `Engine` for now, because it is still the boundary where local interaction turns into history-tracked edits
+- Leave `ToolCommand`, undo/redo redesign, and explicit document operations for later phases
+
+Notes from the current implementation:
+
+- `geometry_change_for_rect()` still lives on `Engine` because it depends on history-layer types (`RectGeometry`, `RectGeometryChange`), so moving it now would blur the Phase 1 boundary
+- `PointerUp` logic still lives on `Engine` for the same reason: it currently produces history-oriented `ToolCommand` values rather than document-level operations
+- `EditorSession` interaction helpers currently take `&DocumentModel`, `&mut DocumentModel`, or rect slices depending on whether the interaction is read-only or preview-mutating; this keeps the session/document ownership split explicit without forcing a larger module restructure yet
+- The larger `document/` and `editor/` module restructure is intentionally deferred until the ownership split is stable
+- After the current refactor, `Engine::tick()` is now significantly simplified — it mostly delegates to `session.pointer_down()`, `session.pointer_move()`, and `session.pointer_cancel()` for local interaction, while keeping history/commit logic inline. This makes the Phase 2 boundary (where `PointerUp` commit points become explicit `DocumentOp` calls) much clearer to identify.
 
 ### Changes
 
