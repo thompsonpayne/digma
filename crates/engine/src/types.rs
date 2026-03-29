@@ -2,6 +2,8 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ops::{DocumentOp, ReorderPlacement};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub u64);
 
@@ -104,6 +106,50 @@ impl DocumentModel {
                     continue;
                 }
                 self.rects.swap(idx, idx - 1);
+            }
+        }
+    }
+
+    pub fn apply_op(&mut self, op: &DocumentOp) {
+        match op {
+            DocumentOp::CreateRect {
+                id,
+                pos,
+                size,
+                color,
+            } => {
+                self.rects.push(RectNode {
+                    id: *id,
+                    pos: *pos,
+                    size: *size,
+                    color: *color,
+                });
+            }
+            DocumentOp::SetRectsGeometry { changes } => {
+                for change in changes {
+                    if let Some(rect) = self.rect_mut(change.id) {
+                        rect.pos = change.after.pos;
+                        rect.size = change.after.size;
+                    }
+                }
+            }
+            DocumentOp::SetRectsFill { changes } => {
+                for change in changes {
+                    if let Some(rect) = self.rect_mut(change.id) {
+                        rect.color = change.after;
+                    }
+                }
+            }
+            DocumentOp::ReorderNodes {
+                node_ids,
+                placement,
+            } => {
+                let to_front = matches!(placement, ReorderPlacement::Forward);
+                self.reorder_selected(node_ids, to_front);
+            }
+            DocumentOp::DeleteNodes { node_ids } => {
+                let ids: HashSet<NodeId> = node_ids.iter().copied().collect();
+                self.rects.retain(|rect| !ids.contains(&rect.id));
             }
         }
     }

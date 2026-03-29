@@ -1,19 +1,17 @@
 use std::collections::HashSet;
 
-use crate::drag::{Corner, DragState};
-use crate::input::{CursorStyle, EngineOutput, InputBatch, InputEvent};
-use crate::render_scene::{self, OverlayScene, RectInstance, RenderScene};
+use crate::drag::DragState;
+use crate::history::RectFillChange;
+use crate::input::{EngineOutput, InputBatch, InputEvent};
+use crate::ops::{DocumentOp, ReorderPlacement};
+use crate::render_scene::{RectInstance, RenderScene};
 use crate::types::{DocumentModel, NodeId, RectNode, Vec2};
-use crate::{EditorSession, RectGeometry, RectGeometryChange, ToolCommand, ToolMode};
+use crate::{EditorSession, RectGeometry, RectGeometryChange, ToolCommand};
 
 pub struct Engine {
     pub document: DocumentModel,
     pub session: EditorSession,
 
-    // pub camera: Camera,
-    // pub selected: Vec<NodeId>,
-    // pub drag_state: DragState,
-    // pub hover_screen_px: Option<Vec2>,
     undo_stack: Vec<ToolCommand>,
     redo_stack: Vec<ToolCommand>,
 }
@@ -174,11 +172,27 @@ impl Engine {
                 }
                 InputEvent::SetSelectionFill { color } => {
                     let selected: HashSet<NodeId> = self.session.selected.iter().copied().collect();
+                    //
+                    // for rect in &mut self.document.rects {
+                    //     if selected.contains(&rect.id) {
+                    //         rect.color = [color.r, color.g, color.b, color.a];
+                    //     }
+                    // }
+                    let changes: Vec<RectFillChange> = self
+                        .document
+                        .rects
+                        .iter()
+                        .filter(|r| selected.contains(&r.id))
+                        .map(|r| RectFillChange {
+                            id: r.id,
+                            before: r.color,
+                            after: [color.r, color.g, color.b, color.a],
+                        })
+                        .collect();
 
-                    for rect in &mut self.document.rects {
-                        if selected.contains(&rect.id) {
-                            rect.color = [color.r, color.g, color.b, color.a];
-                        }
+                    if !changes.is_empty() {
+                        self.document
+                            .apply_op(&DocumentOp::SetRectsFill { changes });
                     }
                 }
                 InputEvent::Undo => {
@@ -192,18 +206,25 @@ impl Engine {
                         continue;
                     }
 
-                    let command = ToolCommand::BringForward(self.session.selected.clone());
-                    self.apply_command(&command, true);
-                    self.push_history(command);
+                    // let command = ToolCommand::BringForward(self.session.selected.clone());
+                    // self.apply_command(&command, true);
+                    // self.push_history(command);
+                    self.document.apply_op(&DocumentOp::ReorderNodes {
+                        node_ids: self.session.selected.clone(),
+                        placement: ReorderPlacement::Forward,
+                    });
+                    self.push_history(ToolCommand::BringForward(self.session.selected.clone()));
                 }
                 InputEvent::SendBackward => {
                     if self.session.selected.is_empty() {
                         continue;
                     }
 
-                    let command = ToolCommand::SendBackward(self.session.selected.clone());
-                    self.apply_command(&command, true);
-                    self.push_history(command);
+                    self.document.apply_op(&DocumentOp::ReorderNodes {
+                        node_ids: self.session.selected.clone(),
+                        placement: ReorderPlacement::Backward,
+                    });
+                    self.push_history(ToolCommand::SendBackward(self.session.selected.clone()));
                 }
                 InputEvent::DeleteSelected => {
                     let selected_ids: HashSet<NodeId> =
@@ -309,9 +330,12 @@ impl Engine {
             } => {
                 let deleted_ids: HashSet<NodeId> = rects.iter().map(|r| r.0.id).collect();
                 if forward {
-                    self.document
-                        .rects
-                        .retain(|rect| !deleted_ids.contains(&rect.id));
+                    // self.document
+                    //     .rects
+                    //     .retain(|rect| !deleted_ids.contains(&rect.id));
+                    self.document.apply_op(&DocumentOp::DeleteNodes {
+                        node_ids: deleted_ids.iter().copied().collect(),
+                    });
                     self.session.selected.retain(|id| !deleted_ids.contains(id));
 
                     self.session.selected = next_selection.clone();
@@ -377,7 +401,9 @@ impl Default for Engine {
 #[cfg(test)]
 mod test {
     use crate::Camera;
+    use crate::CursorStyle;
     use crate::PendingSelectionMove;
+    use crate::ToolMode;
 
     use super::*;
 

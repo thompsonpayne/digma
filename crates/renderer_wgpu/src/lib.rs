@@ -268,7 +268,7 @@ impl Renderer {
         };
 
         self.queue
-            .write_buffer(&self.session.camera_buf, 0, bytemuck::bytes_of(&camera_uniform));
+            .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&camera_uniform));
     }
 
     pub fn render(
@@ -286,7 +286,7 @@ impl Renderer {
         };
 
         self.queue
-            .write_buffer(&self.session.camera_buf, 0, bytemuck::bytes_of(&camera_uniform));
+            .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&camera_uniform));
 
         let frame = self
             .surface
@@ -384,7 +384,7 @@ impl Renderer {
             });
 
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.session.camera_bind_group, &[]);
+            pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
             pass.set_vertex_buffer(1, self.scene_instance.slice(..));
             pass.draw(0..self.vertex_count, 0..self.scene_instance_count);
@@ -409,7 +409,7 @@ impl Renderer {
             });
 
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.session.camera_bind_group, &[]);
+            pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
             pass.set_vertex_buffer(1, self.overlay_instance.slice(..));
             pass.draw(0..self.vertex_count, 0..self.overlay_instance_count);

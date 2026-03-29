@@ -3,6 +3,7 @@ mod drag;
 mod engine;
 mod history;
 mod input;
+mod ops;
 mod render_scene;
 mod session;
 mod types;

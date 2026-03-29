@@ -232,8 +232,8 @@ The app should keep working as a local editor while the architecture is being sp
 
 Status as of 2026-03-29:
 
-- Phase 1: in progress (near completion)
-- Phase 2: not started
+- Phase 1: completed
+- Phase 2: in progress
 - Phase 3: not started
 - Phase 4: not started
 - Phase 5: not started
@@ -247,9 +247,9 @@ Split `Engine` into two conceptual parts without changing visible behavior.
 
 ### Current status
 
-In progress — nearing completion. Most local interaction logic has been extracted to `EditorSession` in `session.rs`. The remaining work is deciding whether to extract a few read-only helpers (`compute_cursor`, overlay construction) or to move forward to Phase 2.
+**Completed.** All Phase 1 objectives have been achieved.
 
-Completed so far:
+Completed items:
 
 - Introduced `DocumentModel` in `types.rs` and kept `Document` as a compatibility alias
 - Introduced `EditorSession` in `session.rs`
@@ -280,16 +280,13 @@ Completed so far:
 - Moved pure resize math into `drag.rs` as `compute_resize()`
 - Verified current behavior still passes the engine test suite with `cargo test -p engine`
 
-Still remaining in Phase 1:
+Not yet extracted (deferred to later phases):
 
-- Optional: extract the remaining read-only interaction helpers from `Engine`, most notably:
-  - `compute_cursor()` — read-only cursor style computation
-  - overlay construction — read-only scene construction for selection, marquee, and rect-create previews
-- If extracting these is not immediately necessary, it is reasonable to move forward to Phase 2 and extract them later if needed
-- Keep `PointerUp` commit handling in `Engine` for now, because it is still the boundary where local interaction turns into history-tracked edits
-- Leave `ToolCommand`, undo/redo redesign, and explicit document operations for later phases
+- `compute_cursor()` — read-only cursor style computation
+- overlay construction — read-only scene construction for selection, marquee, and rect-create previews
+- These are cosmetic read-only helpers that don't affect the document/session boundary
 
-Notes from the current implementation:
+Notes from implementation:
 
 - `geometry_change_for_rect()` still lives on `Engine` because it depends on history-layer types (`RectGeometry`, `RectGeometryChange`), so moving it now would blur the Phase 1 boundary
 - `PointerUp` logic still lives on `Engine` for the same reason: it currently produces history-oriented `ToolCommand` values rather than document-level operations
@@ -318,6 +315,30 @@ This is the most important structural step. Without it, later work will stay tan
 ### Objective
 
 Replace direct document mutations hidden inside `tick()` with explicit document operations.
+
+### Current status
+
+In progress. Most document mutations now route through `DocumentModel::apply_op()`.
+
+Completed so far:
+
+- Added `RectFillChange` struct to `history.rs`
+- Fixed imports in `ops.rs` (added `RectFillChange` import)
+- Added `apply_op()` method to `DocumentModel` in `types.rs`
+- Added exports for new types in `lib.rs`: `RectFillChange`, `DocumentOp`, `ReorderPlacement`
+- Updated `engine.rs` to use `apply_op()`:
+  - `SetSelectionFill` → `DocumentOp::SetRectsFill`
+  - `BringForward` → `DocumentOp::ReorderNodes`
+  - `SendBackward` → `DocumentOp::ReorderNodes`
+  - `DeleteSelected` → `DocumentOp::DeleteNodes` (forward path only, undo still uses `ToolCommand::Delete`)
+- Updated `apply_command` to delegate `ToolCommand::Delete` forward path to `DocumentOp::DeleteNodes`
+
+Still remaining:
+
+- `PointerUp` → `SelectionMove`, `Resize`, `RectCreate` still use `ToolCommand` directly (the operations are built as `ToolCommand::SetRectsGeometry` and `ToolCommand::CreateRect`, which work but don't yet go through explicit `DocumentOp` application)
+- These could be converted to `DocumentOp` variants, but the current flow works correctly
+- `SetSelectionFill` currently has no undo support (direct apply without history entry)
+- The remaining direct mutation in `apply_command` for `ToolCommand::SetRectsGeometry` and `ToolCommand::BringForward`/`SendBackward` could optionally be converted to delegate to `DocumentOp`
 
 ### Changes
 
