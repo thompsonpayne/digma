@@ -1,12 +1,14 @@
 use std::collections::HashSet;
 
 use crate::{
-    Corner, DragState, HandleHit, NodeId, RectNode, ToolMode, Vec2,
+    Corner, CursorStyle, DragState, HandleHit, NodeId, OverlayScene, RectInstance, RectNode,
+    ToolMode, Vec2,
     camera::Camera,
     drag::{
         MarqueeDrag, PendingMarquee, PendingRectCreate, PendingResize, PendingSelectionMove,
         RectCreateDrag, ResizeDrag, SelectionDrag, compute_resize,
     },
+    render_scene,
     types::DocumentModel,
 };
 
@@ -450,6 +452,195 @@ impl EditorSession {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Determine the cursor style to show based on current hover position and drag state.
+    pub fn compute_cursor(&self, tool_mode: &ToolMode, rects: &[RectNode]) -> CursorStyle {
+        // Show the rect create cross hair cursor
+        if matches!(
+            self.drag_state,
+            DragState::PendingRectCreate(_) | DragState::RectCreate(_)
+        ) {
+            return CursorStyle::Crosshair;
+        }
+
+        // During an active move drag, always show the move cursor.
+        if matches!(
+            self.drag_state,
+            DragState::SelectionMove(_) | DragState::PendingSelectionMove(_)
+        ) {
+            return CursorStyle::Move;
+        }
+
+        // If hovering over a handle, show the appropriate resize cursor.
+        if matches!(tool_mode, ToolMode::Select)
+            && let Some(screen_px) = self.hover_screen_px
+        {
+            let world = self.camera.screen_to_world(screen_px);
+            if let Some(hit) = self.check_collide_handle(world, rects) {
+                return match hit.corner {
+                    Corner::TL | Corner::BR => CursorStyle::ResizeTlBr,
+                    Corner::TR | Corner::BL => CursorStyle::ResizeTrBl,
+                };
+            }
+        }
+
+        CursorStyle::Default
+    }
+
+    pub fn update_overlay_scene(&self, tool_mode: &ToolMode, rects: &[RectNode]) -> OverlayScene {
+        let outline_px = 2.0;
+        let handle_px = 8.0;
+        let outline = outline_px / self.camera.zoom;
+        let handle = handle_px / self.camera.zoom;
+        let outline_color = [0.95, 0.95, 0.95, 1.0];
+        let handle_color = [0.1, 0.6, 1.0, 1.0];
+        let mut overlay_rects = Vec::new();
+        for id in &self.selected {
+            if matches!(tool_mode, ToolMode::Rect) {
+                break;
+            }
+
+            let Some(rect) = rects.iter().find(|r| r.id == *id) else {
+                continue;
+            };
+            let x = rect.pos.x;
+            let y = rect.pos.y;
+            let w = rect.size.x;
+            let h = rect.size.y;
+            // outline
+            overlay_rects.push(RectInstance {
+                pos: [x, y],
+                size: [w, outline],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [x, y + h - outline],
+                size: [w, outline],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [x, y],
+                size: [outline, h],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [x + w - outline, y],
+                size: [outline, h],
+                color: outline_color,
+            });
+            // handles
+            overlay_rects.push(RectInstance {
+                pos: [x - handle * 0.5, y - handle * 0.5],
+                size: [handle, handle],
+                color: handle_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [x + w - handle * 0.5, y - handle * 0.5],
+                size: [handle, handle],
+                color: handle_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [x - handle * 0.5, y + h - handle * 0.5],
+                size: [handle, handle],
+                color: handle_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [x + w - handle * 0.5, y + h - handle * 0.5],
+                size: [handle, handle],
+                color: handle_color,
+            });
+        }
+
+        if let DragState::Marquee(drag) = &self.drag_state {
+            let min_x = drag.start_world.x.min(drag.current_world.x);
+            let min_y = drag.start_world.y.min(drag.current_world.y);
+            let max_x = drag.start_world.x.max(drag.current_world.x);
+            let max_y = drag.start_world.y.max(drag.current_world.y);
+
+            let w = (max_x - min_x).max(0.0);
+            let h = (max_y - min_y).max(0.0);
+
+            let fill_color = [0.2, 0.6, 1.0, 0.08];
+            let outline_color = [0.2, 0.6, 1.0, 0.9];
+            let outline_px = 1.0 / self.camera.zoom;
+
+            // fill
+            overlay_rects.push(RectInstance {
+                pos: [min_x, min_y],
+                size: [w, h],
+                color: fill_color,
+            });
+
+            // outline (4 thin rects)
+            overlay_rects.push(RectInstance {
+                pos: [min_x, min_y],
+                size: [w, outline_px],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [min_x, max_y - outline_px],
+                size: [w, outline_px],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [min_x, min_y],
+                size: [outline_px, h],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [max_x - outline_px, min_y],
+                size: [outline_px, h],
+                color: outline_color,
+            });
+        }
+
+        if let DragState::RectCreate(drag) = &self.drag_state {
+            let min_x = drag.start_world.x.min(drag.current_world.x);
+            let min_y = drag.start_world.y.min(drag.current_world.y);
+            let max_x = drag.start_world.x.max(drag.current_world.x);
+            let max_y = drag.start_world.y.max(drag.current_world.y);
+
+            let w = (max_x - min_x).max(0.0);
+            let h = (max_y - min_y).max(0.0);
+
+            let fill_color = [0.2, 0.6, 1.0, 0.08];
+            let outline_color = [0.2, 0.6, 1.0, 0.9];
+            let outline_px = 1.0 / self.camera.zoom;
+
+            // fill
+            overlay_rects.push(RectInstance {
+                pos: [min_x, min_y],
+                size: [w, h],
+                color: fill_color,
+            });
+
+            // outline (4 thin rects)
+            overlay_rects.push(RectInstance {
+                pos: [min_x, min_y],
+                size: [w, outline_px],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [min_x, max_y - outline_px],
+                size: [w, outline_px],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [min_x, min_y],
+                size: [outline_px, h],
+                color: outline_color,
+            });
+            overlay_rects.push(RectInstance {
+                pos: [max_x - outline_px, min_y],
+                size: [outline_px, h],
+                color: outline_color,
+            });
+        }
+
+        render_scene::OverlayScene {
+            rects: overlay_rects,
         }
     }
 }

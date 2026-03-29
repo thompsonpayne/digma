@@ -247,169 +247,19 @@ impl Engine {
                 .collect(),
         };
 
-        let overlay_scene = self.update_overlay_scene(&batch.tool);
-        let cursor = self.compute_cursor(&batch.tool);
+        let overlay_scene = self
+            .session
+            .update_overlay_scene(&batch.tool, &self.document.rects);
+
+        let cursor = self
+            .session
+            .compute_cursor(&batch.tool, &self.document.rects);
 
         EngineOutput {
             camera: self.session.camera,
             render_scene,
             overlay_scene,
             cursor,
-        }
-    }
-
-    fn update_overlay_scene(&self, tool_mode: &ToolMode) -> OverlayScene {
-        let outline_px = 2.0;
-        let handle_px = 8.0;
-        let outline = outline_px / self.session.camera.zoom;
-        let handle = handle_px / self.session.camera.zoom;
-        let outline_color = [0.95, 0.95, 0.95, 1.0];
-        let handle_color = [0.1, 0.6, 1.0, 1.0];
-        let mut overlay_rects = Vec::new();
-        for id in &self.session.selected {
-            if matches!(tool_mode, ToolMode::Rect) {
-                break;
-            }
-
-            let Some(rect) = self.document.rects.iter().find(|r| r.id == *id) else {
-                continue;
-            };
-            let x = rect.pos.x;
-            let y = rect.pos.y;
-            let w = rect.size.x;
-            let h = rect.size.y;
-            // outline
-            overlay_rects.push(RectInstance {
-                pos: [x, y],
-                size: [w, outline],
-                color: outline_color,
-            });
-            overlay_rects.push(RectInstance {
-                pos: [x, y + h - outline],
-                size: [w, outline],
-                color: outline_color,
-            });
-            overlay_rects.push(RectInstance {
-                pos: [x, y],
-                size: [outline, h],
-                color: outline_color,
-            });
-            overlay_rects.push(RectInstance {
-                pos: [x + w - outline, y],
-                size: [outline, h],
-                color: outline_color,
-            });
-            // handles
-            overlay_rects.push(RectInstance {
-                pos: [x - handle * 0.5, y - handle * 0.5],
-                size: [handle, handle],
-                color: handle_color,
-            });
-            overlay_rects.push(RectInstance {
-                pos: [x + w - handle * 0.5, y - handle * 0.5],
-                size: [handle, handle],
-                color: handle_color,
-            });
-            overlay_rects.push(RectInstance {
-                pos: [x - handle * 0.5, y + h - handle * 0.5],
-                size: [handle, handle],
-                color: handle_color,
-            });
-            overlay_rects.push(RectInstance {
-                pos: [x + w - handle * 0.5, y + h - handle * 0.5],
-                size: [handle, handle],
-                color: handle_color,
-            });
-        }
-
-        if let DragState::Marquee(drag) = &self.session.drag_state {
-            let min_x = drag.start_world.x.min(drag.current_world.x);
-            let min_y = drag.start_world.y.min(drag.current_world.y);
-            let max_x = drag.start_world.x.max(drag.current_world.x);
-            let max_y = drag.start_world.y.max(drag.current_world.y);
-
-            let w = (max_x - min_x).max(0.0);
-            let h = (max_y - min_y).max(0.0);
-
-            let fill_color = [0.2, 0.6, 1.0, 0.08];
-            let outline_color = [0.2, 0.6, 1.0, 0.9];
-            let outline_px = 1.0 / self.session.camera.zoom;
-
-            // fill
-            overlay_rects.push(RectInstance {
-                pos: [min_x, min_y],
-                size: [w, h],
-                color: fill_color,
-            });
-
-            // outline (4 thin rects)
-            overlay_rects.push(RectInstance {
-                pos: [min_x, min_y],
-                size: [w, outline_px],
-                color: outline_color,
-            });
-            overlay_rects.push(RectInstance {
-                pos: [min_x, max_y - outline_px],
-                size: [w, outline_px],
-                color: outline_color,
-            });
-            overlay_rects.push(RectInstance {
-                pos: [min_x, min_y],
-                size: [outline_px, h],
-                color: outline_color,
-            });
-            overlay_rects.push(RectInstance {
-                pos: [max_x - outline_px, min_y],
-                size: [outline_px, h],
-                color: outline_color,
-            });
-        }
-
-        if let DragState::RectCreate(drag) = &self.session.drag_state {
-            let min_x = drag.start_world.x.min(drag.current_world.x);
-            let min_y = drag.start_world.y.min(drag.current_world.y);
-            let max_x = drag.start_world.x.max(drag.current_world.x);
-            let max_y = drag.start_world.y.max(drag.current_world.y);
-
-            let w = (max_x - min_x).max(0.0);
-            let h = (max_y - min_y).max(0.0);
-
-            let fill_color = [0.2, 0.6, 1.0, 0.08];
-            let outline_color = [0.2, 0.6, 1.0, 0.9];
-            let outline_px = 1.0 / self.session.camera.zoom;
-
-            // fill
-            overlay_rects.push(RectInstance {
-                pos: [min_x, min_y],
-                size: [w, h],
-                color: fill_color,
-            });
-
-            // outline (4 thin rects)
-            overlay_rects.push(RectInstance {
-                pos: [min_x, min_y],
-                size: [w, outline_px],
-                color: outline_color,
-            });
-            overlay_rects.push(RectInstance {
-                pos: [min_x, max_y - outline_px],
-                size: [w, outline_px],
-                color: outline_color,
-            });
-            overlay_rects.push(RectInstance {
-                pos: [min_x, min_y],
-                size: [outline_px, h],
-                color: outline_color,
-            });
-            overlay_rects.push(RectInstance {
-                pos: [max_x - outline_px, min_y],
-                size: [outline_px, h],
-                color: outline_color,
-            });
-        }
-
-        render_scene::OverlayScene {
-            rects: overlay_rects,
         }
     }
 
@@ -515,43 +365,6 @@ impl Engine {
         } else {
             None
         }
-    }
-
-    /// Determine the cursor style to show based on current hover position and drag state.
-    pub fn compute_cursor(&self, tool_mode: &ToolMode) -> CursorStyle {
-        // Show the rect create cross hair cursor
-        if matches!(
-            self.session.drag_state,
-            DragState::PendingRectCreate(_) | DragState::RectCreate(_)
-        ) {
-            return CursorStyle::Crosshair;
-        }
-
-        // During an active move drag, always show the move cursor.
-        if matches!(
-            self.session.drag_state,
-            DragState::SelectionMove(_) | DragState::PendingSelectionMove(_)
-        ) {
-            return CursorStyle::Move;
-        }
-
-        // If hovering over a handle, show the appropriate resize cursor.
-        if matches!(tool_mode, ToolMode::Select)
-            && let Some(screen_px) = self.session.hover_screen_px
-        {
-            let world = self.session.camera.screen_to_world(screen_px);
-            if let Some(hit) = self
-                .session
-                .check_collide_handle(world, &self.document.rects)
-            {
-                return match hit.corner {
-                    Corner::TL | Corner::BR => CursorStyle::ResizeTlBr,
-                    Corner::TR | Corner::BL => CursorStyle::ResizeTrBl,
-                };
-            }
-        }
-
-        CursorStyle::Default
     }
 }
 
@@ -1119,7 +932,9 @@ mod test {
     #[test]
     fn cursor_defaults_to_default_with_not_hover() {
         let engine = engine_with_one_rect();
-        let cursor = engine.compute_cursor(&ToolMode::Select);
+        let cursor = engine
+            .session
+            .compute_cursor(&ToolMode::Select, &engine.document.rects);
         assert_eq!(cursor, CursorStyle::Default);
     }
 
@@ -1130,7 +945,9 @@ mod test {
         engine.session.selected = vec![id];
 
         engine.session.hover_screen_px = Some(Vec2::new(50.0, 50.0));
-        let cursor = engine.compute_cursor(&ToolMode::Select);
+        let cursor = engine
+            .session
+            .compute_cursor(&ToolMode::Select, &engine.document.rects);
         assert_eq!(cursor, CursorStyle::ResizeTlBr);
     }
 
@@ -1141,7 +958,9 @@ mod test {
         engine.session.selected = vec![id];
 
         engine.session.hover_screen_px = Some(Vec2::new(150.0, 50.0));
-        let cursor = engine.compute_cursor(&ToolMode::Select);
+        let cursor = engine
+            .session
+            .compute_cursor(&ToolMode::Select, &engine.document.rects);
         assert_eq!(cursor, CursorStyle::ResizeTrBl);
     }
 
@@ -1152,7 +971,9 @@ mod test {
         engine.session.selected = vec![id];
         // Far from any handle
         engine.session.hover_screen_px = Some(Vec2::new(100.0, 100.0)); // center of rect
-        let cursor = engine.compute_cursor(&ToolMode::Select);
+        let cursor = engine
+            .session
+            .compute_cursor(&ToolMode::Select, &engine.document.rects);
         assert_eq!(cursor, CursorStyle::Default);
     }
 
@@ -1164,7 +985,9 @@ mod test {
             start_world: Vec2::new(100.0, 100.0),
             previous_selection: vec![],
         });
-        let cursor = engine.compute_cursor(&ToolMode::Select);
+        let cursor = engine
+            .session
+            .compute_cursor(&ToolMode::Select, &engine.document.rects);
         assert_eq!(cursor, CursorStyle::Move);
     }
 }
