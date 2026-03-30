@@ -76,7 +76,7 @@ impl DocumentModel {
         self.rects.iter_mut().find(|rect| rect.id == id)
     }
 
-    pub fn reorder_selected(&mut self, node_ids: &[NodeId], to_front: bool) {
+    fn reorder_selected(&mut self, node_ids: &[NodeId], to_front: bool) {
         let selected_ids: HashSet<NodeId> = node_ids.iter().copied().collect();
         let mut indices: Vec<usize> = selected_ids
             .iter()

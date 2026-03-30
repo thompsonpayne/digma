@@ -43,9 +43,11 @@ pub enum ToolCommand {
         previous_selection: Vec<NodeId>, // what self.session.selected was before applying delete
         next_selection: Vec<NodeId>, // what self.session.selected should be after applying delete
     },
+
+    SetRectsFill(Vec<RectFillChange>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RectFillChange {
     pub id: NodeId,
     pub before: [f32; 4],

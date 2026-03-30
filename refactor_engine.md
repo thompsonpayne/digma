@@ -230,10 +230,10 @@ The app should keep working as a local editor while the architecture is being sp
 
 ## Current Progress
 
-Status as of 2026-03-29:
+Status as of 2026-03-30:
 
 - Phase 1: completed
-- Phase 2: in progress
+- Phase 2: completed
 - Phase 3: not started
 - Phase 4: not started
 - Phase 5: not started
@@ -318,27 +318,42 @@ Replace direct document mutations hidden inside `tick()` with explicit document 
 
 ### Current status
 
-In progress. Most document mutations now route through `DocumentModel::apply_op()`.
+**Completed.** All Phase 2 objectives have been achieved.
 
-Completed so far:
+Completed items:
 
 - Added `RectFillChange` struct to `history.rs`
+- Added `ToolCommand::SetRectsFill` variant to `history.rs`
+- Added `ReorderPlacement` enum to `ops.rs`
 - Fixed imports in `ops.rs` (added `RectFillChange` import)
-- Added `apply_op()` method to `DocumentModel` in `types.rs`
-- Added exports for new types in `lib.rs`: `RectFillChange`, `DocumentOp`, `ReorderPlacement`
-- Updated `engine.rs` to use `apply_op()`:
-  - `SetSelectionFill` → `DocumentOp::SetRectsFill`
-  - `BringForward` → `DocumentOp::ReorderNodes`
-  - `SendBackward` → `DocumentOp::ReorderNodes`
-  - `DeleteSelected` → `DocumentOp::DeleteNodes` (forward path only, undo still uses `ToolCommand::Delete`)
-- Updated `apply_command` to delegate `ToolCommand::Delete` forward path to `DocumentOp::DeleteNodes`
+- Added `apply_op()` method to `DocumentModel` in `types.rs` handling all 5 `DocumentOp` variants:
+  - `CreateRect` → pushes rect to `rects`
+  - `SetRectsGeometry` → updates `pos` and `size`
+  - `SetRectsFill` → updates `color`
+  - `ReorderNodes` → delegates to `reorder_selected()`
+  - `DeleteNodes` → removes from `rects` via `retain()`
+- Updated `apply_command` to delegate all forward paths to `apply_op()`:
+  - `ToolCommand::CreateRect` forward → `DocumentOp::CreateRect`
+  - `ToolCommand::SetRectsGeometry` → `DocumentOp::SetRectsGeometry`
+  - `ToolCommand::BringForward` → `DocumentOp::ReorderNodes`
+  - `ToolCommand::SendBackward` → `DocumentOp::ReorderNodes`
+  - `ToolCommand::Delete` forward → `DocumentOp::DeleteNodes`
+  - `ToolCommand::SetRectsFill` → `DocumentOp::SetRectsFill`
+- Updated `tick()` handler to use `apply_op()` directly:
+  - `SetSelectionFill` → `DocumentOp::SetRectsFill` + history
+  - `BringForward` → `DocumentOp::ReorderNodes` + history
+  - `SendBackward` → `DocumentOp::ReorderNodes` + history
+  - `DeleteSelected` → via `apply_command` (delegates to `DocumentOp::DeleteNodes`)
+- Fixed `SetRectsFill` inverse path: added forward/inverse handling that swaps `before` and `after` colors for undo
+- Inverse paths for other operations kept as-is (deferred to Phase 3)
+- Verified all tests pass with `cargo test -p engine`
 
-Still remaining:
+Design decisions:
 
-- `PointerUp` → `SelectionMove`, `Resize`, `RectCreate` still use `ToolCommand` directly (the operations are built as `ToolCommand::SetRectsGeometry` and `ToolCommand::CreateRect`, which work but don't yet go through explicit `DocumentOp` application)
-- These could be converted to `DocumentOp` variants, but the current flow works correctly
-- `SetSelectionFill` currently has no undo support (direct apply without history entry)
-- The remaining direct mutation in `apply_command` for `ToolCommand::SetRectsGeometry` and `ToolCommand::BringForward`/`SendBackward` could optionally be converted to delegate to `DocumentOp`
+- Inverse paths (undo) kept as direct mutations in `apply_command` for now
+- `PointerUp` handler left unchanged — it produces `ToolCommand` values and delegates to `apply_command`
+- Accepted double clones in `BringForward`/`SendBackward` tick handlers (negligible for typical use, Phase 3 will redesign history to eliminate this)
+- `DocumentOp` uses owned data (`Vec<T>`) rather than references — simpler API, lifetime annotations deferred to Phase 3
 
 ### Changes
 

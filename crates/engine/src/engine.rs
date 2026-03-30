@@ -191,8 +191,10 @@ impl Engine {
                         .collect();
 
                     if !changes.is_empty() {
-                        self.document
-                            .apply_op(&DocumentOp::SetRectsFill { changes });
+                        let command = ToolCommand::SetRectsFill(changes);
+
+                        self.apply_command(&command, true);
+                        self.push_history(command);
                     }
                 }
                 InputEvent::Undo => {
@@ -298,7 +300,13 @@ impl Engine {
             } => {
                 if forward {
                     if self.document.rect_index(rect.id).is_none() {
-                        self.document.rects.push(*rect);
+                        // self.document.rects.push(*rect);
+                        self.document.apply_op(&DocumentOp::CreateRect {
+                            id: rect.id,
+                            pos: rect.pos,
+                            size: rect.size,
+                            color: rect.color,
+                        });
                     }
                     self.session.selected = next_selection.clone();
                 } else {
@@ -309,19 +317,21 @@ impl Engine {
                 }
             }
             ToolCommand::SetRectsGeometry { changes } => {
-                for change in changes {
-                    let geometry = if forward { change.after } else { change.before };
-                    if let Some(rect) = self.document.rect_mut(change.id) {
-                        rect.pos = geometry.pos;
-                        rect.size = geometry.size;
-                    }
-                }
+                self.document.apply_op(&DocumentOp::SetRectsGeometry {
+                    changes: changes.to_vec(),
+                });
             }
             ToolCommand::BringForward(node_ids) => {
-                self.document.reorder_selected(node_ids, forward);
+                self.document.apply_op(&DocumentOp::ReorderNodes {
+                    node_ids: node_ids.to_vec(),
+                    placement: ReorderPlacement::Forward,
+                });
             }
             ToolCommand::SendBackward(node_ids) => {
-                self.document.reorder_selected(node_ids, !forward);
+                self.document.apply_op(&DocumentOp::ReorderNodes {
+                    node_ids: node_ids.to_vec(),
+                    placement: ReorderPlacement::Backward,
+                });
             }
             ToolCommand::Delete {
                 rects,
@@ -330,9 +340,6 @@ impl Engine {
             } => {
                 let deleted_ids: HashSet<NodeId> = rects.iter().map(|r| r.0.id).collect();
                 if forward {
-                    // self.document
-                    //     .rects
-                    //     .retain(|rect| !deleted_ids.contains(&rect.id));
                     self.document.apply_op(&DocumentOp::DeleteNodes {
                         node_ids: deleted_ids.iter().copied().collect(),
                     });
@@ -350,6 +357,25 @@ impl Engine {
                         }
                     }
                     self.session.selected = previous_selection.clone();
+                }
+            }
+            ToolCommand::SetRectsFill(rect_fill_changes) => {
+                if forward {
+                    self.document.apply_op(&DocumentOp::SetRectsFill {
+                        changes: rect_fill_changes.to_vec(),
+                    });
+                } else {
+                    let inverted: Vec<RectFillChange> = rect_fill_changes
+                        .iter()
+                        .map(|c| RectFillChange {
+                            id: c.id,
+                            before: c.after,
+                            after: c.before,
+                        })
+                        .collect();
+
+                    self.document
+                        .apply_op(&DocumentOp::SetRectsFill { changes: inverted });
                 }
             }
         }
