@@ -1,19 +1,54 @@
 use std::collections::HashSet;
 
 use crate::drag::DragState;
-use crate::history::RectFillChange;
+use crate::history::{HistoryEntry, HistoryGroup, RectFillChange};
 use crate::input::{EngineOutput, InputBatch, InputEvent};
 use crate::ops::{DocumentOp, ReorderPlacement};
 use crate::render_scene::{RectInstance, RenderScene};
 use crate::types::{DocumentModel, NodeId, RectNode, Vec2};
-use crate::{EditorSession, RectGeometry, RectGeometryChange, ToolCommand};
+use crate::{EditorSession, RectGeometry, RectGeometryChange};
 
 pub struct Engine {
     pub document: DocumentModel,
     pub session: EditorSession,
 
-    undo_stack: Vec<ToolCommand>,
-    redo_stack: Vec<ToolCommand>,
+    undo_stack: Vec<HistoryGroup>,
+    redo_stack: Vec<HistoryGroup>,
+}
+
+fn invert_geometry_changes(changes: &[RectGeometryChange]) -> Vec<RectGeometryChange> {
+    changes
+        .iter()
+        .map(|change| RectGeometryChange {
+            id: change.id,
+            before: change.after,
+            after: change.before,
+        })
+        .collect()
+}
+
+fn invert_fill_changes(changes: &[RectFillChange]) -> Vec<RectFillChange> {
+    changes
+        .iter()
+        .map(|change| RectFillChange {
+            id: change.id,
+            before: change.after,
+            after: change.before,
+        })
+        .collect()
+}
+
+fn single_entry_group(
+    forward: DocumentOp,
+    inverse: DocumentOp,
+    selection_before: Vec<NodeId>,
+    selection_after: Vec<NodeId>,
+) -> HistoryGroup {
+    HistoryGroup {
+        entries: vec![HistoryEntry { forward, inverse }],
+        selection_before,
+        selection_after,
+    }
 }
 
 impl Engine {
@@ -105,7 +140,7 @@ impl Engine {
                     let drag_state =
                         std::mem::replace(&mut self.session.drag_state, DragState::Idle);
 
-                    let command = match drag_state {
+                    let history_group = match drag_state {
                         DragState::SelectionMove(drag) => {
                             let changes: Vec<RectGeometryChange> = drag
                                 .origins
@@ -119,20 +154,50 @@ impl Engine {
                                 })
                                 .collect();
 
-                            (!changes.is_empty())
-                                .then_some(ToolCommand::SetRectsGeometry { changes })
+                            if changes.is_empty() {
+                                None
+                            } else {
+                                Some((
+                                    single_entry_group(
+                                        DocumentOp::SetRectsGeometry {
+                                            changes: changes.clone(),
+                                        },
+                                        DocumentOp::SetRectsGeometry {
+                                            changes: invert_geometry_changes(&changes),
+                                        },
+                                        self.session.selected.clone(),
+                                        self.session.selected.clone(),
+                                    ),
+                                    false,
+                                ))
+                            }
                         }
-                        DragState::Resize(drag) => self
-                            .geometry_change_for_rect(
+                        DragState::Resize(drag) => {
+                            let change = self.geometry_change_for_rect(
                                 drag.handle.node_id,
                                 RectGeometry {
                                     pos: drag.origin_pos,
                                     size: drag.origin_size,
                                 },
-                            )
-                            .map(|change| ToolCommand::SetRectsGeometry {
-                                changes: vec![change],
-                            }),
+                            );
+
+                            change.map(|change| {
+                                let changes = vec![change];
+                                (
+                                    single_entry_group(
+                                        DocumentOp::SetRectsGeometry {
+                                            changes: changes.clone(),
+                                        },
+                                        DocumentOp::SetRectsGeometry {
+                                            changes: invert_geometry_changes(&changes),
+                                        },
+                                        self.session.selected.clone(),
+                                        self.session.selected.clone(),
+                                    ),
+                                    false,
+                                )
+                            })
+                        }
                         DragState::RectCreate(drag) => {
                             let min_size = 1.0f32;
 
@@ -151,20 +216,31 @@ impl Engine {
                                 color: [0.769, 0.769, 0.769, 1.0],
                             };
 
-                            Some(ToolCommand::CreateRect {
-                                next_selection: vec![rect.id],
-                                previous_selection: drag.previous_selection,
-                                rect,
-                            })
+                            Some((
+                                single_entry_group(
+                                    DocumentOp::CreateRect {
+                                        id: rect.id,
+                                        pos: rect.pos,
+                                        size: rect.size,
+                                        color: rect.color,
+                                    },
+                                    DocumentOp::DeleteNodes {
+                                        node_ids: vec![rect.id],
+                                    },
+                                    drag.previous_selection,
+                                    vec![rect.id],
+                                ),
+                                false,
+                            ))
                         }
                         _ => None,
                     };
 
-                    if let Some(command) = command {
-                        if matches!(command, ToolCommand::CreateRect { .. }) {
-                            self.apply_command(&command, true);
+                    if let Some((group, apply_now)) = history_group {
+                        if apply_now {
+                            self.apply_history_group(&group, true)
                         }
-                        self.push_history(command);
+                        self.push_history_group(group)
                     }
                 }
                 InputEvent::PointerCancel => {
@@ -191,10 +267,19 @@ impl Engine {
                         .collect();
 
                     if !changes.is_empty() {
-                        let command = ToolCommand::SetRectsFill(changes);
+                        let group = single_entry_group(
+                            DocumentOp::SetRectsFill {
+                                changes: changes.clone(),
+                            },
+                            DocumentOp::SetRectsFill {
+                                changes: invert_fill_changes(&changes),
+                            },
+                            self.session.selected.clone(),
+                            self.session.selected.clone(),
+                        );
 
-                        self.apply_command(&command, true);
-                        self.push_history(command);
+                        self.apply_history_group(&group, true);
+                        self.push_history_group(group)
                     }
                 }
                 InputEvent::Undo => {
@@ -208,25 +293,41 @@ impl Engine {
                         continue;
                     }
 
-                    // let command = ToolCommand::BringForward(self.session.selected.clone());
-                    // self.apply_command(&command, true);
-                    // self.push_history(command);
-                    self.document.apply_op(&DocumentOp::ReorderNodes {
-                        node_ids: self.session.selected.clone(),
-                        placement: ReorderPlacement::Forward,
-                    });
-                    self.push_history(ToolCommand::BringForward(self.session.selected.clone()));
+                    let group = single_entry_group(
+                        DocumentOp::ReorderNodes {
+                            node_ids: self.session.selected.clone(),
+                            placement: ReorderPlacement::Forward,
+                        },
+                        DocumentOp::ReorderNodes {
+                            node_ids: self.session.selected.clone(),
+                            placement: ReorderPlacement::Backward,
+                        },
+                        self.session.selected.clone(),
+                        self.session.selected.clone(),
+                    );
+                    self.apply_history_group(&group, true);
+                    self.push_history_group(group);
                 }
                 InputEvent::SendBackward => {
                     if self.session.selected.is_empty() {
                         continue;
                     }
 
-                    self.document.apply_op(&DocumentOp::ReorderNodes {
-                        node_ids: self.session.selected.clone(),
-                        placement: ReorderPlacement::Backward,
-                    });
-                    self.push_history(ToolCommand::SendBackward(self.session.selected.clone()));
+                    let group = single_entry_group(
+                        DocumentOp::ReorderNodes {
+                            node_ids: self.session.selected.clone(),
+                            placement: ReorderPlacement::Backward,
+                        },
+                        DocumentOp::ReorderNodes {
+                            node_ids: self.session.selected.clone(),
+                            placement: ReorderPlacement::Forward,
+                        },
+                        self.session.selected.clone(),
+                        self.session.selected.clone(),
+                    );
+
+                    self.apply_history_group(&group, true);
+                    self.push_history_group(group);
                 }
                 InputEvent::DeleteSelected => {
                     let selected_ids: HashSet<NodeId> =
@@ -245,14 +346,19 @@ impl Engine {
                         continue;
                     }
 
-                    let command = ToolCommand::Delete {
-                        rects,
-                        previous_selection: self.session.selected.clone(),
-                        next_selection: Vec::new(),
-                    };
+                    let node_ids: Vec<NodeId> = rects.iter().map(|(rect, _)| rect.id).collect();
 
-                    self.apply_command(&command, true);
-                    self.push_history(command);
+                    let group = single_entry_group(
+                        DocumentOp::DeleteNodes { node_ids },
+                        DocumentOp::RestoreNodes {
+                            nodes: rects.clone(),
+                        },
+                        self.session.selected.clone(),
+                        Vec::new(),
+                    );
+
+                    self.apply_history_group(&group, true);
+                    self.push_history_group(group);
                 }
             }
         }
@@ -286,109 +392,14 @@ impl Engine {
         }
     }
 
-    fn push_history(&mut self, command: ToolCommand) {
-        self.undo_stack.push(command);
-        self.redo_stack.clear();
-    }
-
-    fn apply_command(&mut self, command: &ToolCommand, forward: bool) {
-        match command {
-            ToolCommand::CreateRect {
-                rect,
-                previous_selection,
-                next_selection,
-            } => {
-                if forward {
-                    if self.document.rect_index(rect.id).is_none() {
-                        // self.document.rects.push(*rect);
-                        self.document.apply_op(&DocumentOp::CreateRect {
-                            id: rect.id,
-                            pos: rect.pos,
-                            size: rect.size,
-                            color: rect.color,
-                        });
-                    }
-                    self.session.selected = next_selection.clone();
-                } else {
-                    if let Some(idx) = self.document.rect_index(rect.id) {
-                        self.document.rects.remove(idx);
-                    }
-                    self.session.selected = previous_selection.clone();
-                }
-            }
-            ToolCommand::SetRectsGeometry { changes } => {
-                self.document.apply_op(&DocumentOp::SetRectsGeometry {
-                    changes: changes.to_vec(),
-                });
-            }
-            ToolCommand::BringForward(node_ids) => {
-                self.document.apply_op(&DocumentOp::ReorderNodes {
-                    node_ids: node_ids.to_vec(),
-                    placement: ReorderPlacement::Forward,
-                });
-            }
-            ToolCommand::SendBackward(node_ids) => {
-                self.document.apply_op(&DocumentOp::ReorderNodes {
-                    node_ids: node_ids.to_vec(),
-                    placement: ReorderPlacement::Backward,
-                });
-            }
-            ToolCommand::Delete {
-                rects,
-                previous_selection,
-                next_selection,
-            } => {
-                let deleted_ids: HashSet<NodeId> = rects.iter().map(|r| r.0.id).collect();
-                if forward {
-                    self.document.apply_op(&DocumentOp::DeleteNodes {
-                        node_ids: deleted_ids.iter().copied().collect(),
-                    });
-                    self.session.selected.retain(|id| !deleted_ids.contains(id));
-
-                    self.session.selected = next_selection.clone();
-                } else {
-                    let mut restored = rects.clone();
-                    restored.sort_by_key(|(_, original_index)| *original_index);
-
-                    for (rect, original_index) in restored {
-                        if self.document.rect_index(rect.id).is_none() {
-                            let insert_at = original_index.min(self.document.rects.len());
-                            self.document.rects.insert(insert_at, rect);
-                        }
-                    }
-                    self.session.selected = previous_selection.clone();
-                }
-            }
-            ToolCommand::SetRectsFill(rect_fill_changes) => {
-                if forward {
-                    self.document.apply_op(&DocumentOp::SetRectsFill {
-                        changes: rect_fill_changes.to_vec(),
-                    });
-                } else {
-                    let inverted: Vec<RectFillChange> = rect_fill_changes
-                        .iter()
-                        .map(|c| RectFillChange {
-                            id: c.id,
-                            before: c.after,
-                            after: c.before,
-                        })
-                        .collect();
-
-                    self.document
-                        .apply_op(&DocumentOp::SetRectsFill { changes: inverted });
-                }
-            }
-        }
-    }
-
     fn undo(&mut self) {
         if !matches!(self.session.drag_state, DragState::Idle) {
             return;
         }
 
-        if let Some(command) = self.undo_stack.pop() {
-            self.apply_command(&command, false);
-            self.redo_stack.push(command);
+        if let Some(group) = self.undo_stack.pop() {
+            self.apply_history_group(&group, false);
+            self.redo_stack.push(group);
         }
     }
 
@@ -397,9 +408,9 @@ impl Engine {
             return;
         }
 
-        if let Some(command) = self.redo_stack.pop() {
-            self.apply_command(&command, true);
-            self.undo_stack.push(command);
+        if let Some(group) = self.redo_stack.pop() {
+            self.apply_history_group(&group, true);
+            self.undo_stack.push(group);
         }
     }
 
@@ -414,6 +425,25 @@ impl Engine {
             Some(RectGeometryChange { id, before, after })
         } else {
             None
+        }
+    }
+
+    fn push_history_group(&mut self, group: HistoryGroup) {
+        self.undo_stack.push(group);
+        self.redo_stack.clear();
+    }
+
+    fn apply_history_group(&mut self, group: &HistoryGroup, forward: bool) {
+        if forward {
+            for entry in &group.entries {
+                self.document.apply_op(&entry.forward);
+            }
+            self.session.selected = group.selection_after.clone();
+        } else {
+            for entry in group.entries.iter().rev() {
+                self.document.apply_op(&entry.inverse);
+            }
+            self.session.selected = group.selection_before.clone();
         }
     }
 }

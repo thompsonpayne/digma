@@ -1,5 +1,6 @@
-use crate::{NodeId, RectGeometryChange, Vec2, history::RectFillChange};
+use crate::{NodeId, RectGeometryChange, RectNode, Vec2, history::RectFillChange};
 
+#[derive(Debug, Clone)]
 pub enum DocumentOp {
     CreateRect {
         id: NodeId,
@@ -21,8 +22,12 @@ pub enum DocumentOp {
     DeleteNodes {
         node_ids: Vec<NodeId>,
     },
+    RestoreNodes {
+        nodes: Vec<(RectNode, usize)>,
+    },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReorderPlacement {
     Forward,
     Backward,

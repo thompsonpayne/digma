@@ -118,12 +118,14 @@ impl DocumentModel {
                 size,
                 color,
             } => {
-                self.rects.push(RectNode {
-                    id: *id,
-                    pos: *pos,
-                    size: *size,
-                    color: *color,
-                });
+                if self.rect_index(*id).is_none() {
+                    self.rects.push(RectNode {
+                        id: *id,
+                        pos: *pos,
+                        size: *size,
+                        color: *color,
+                    });
+                }
             }
             DocumentOp::SetRectsGeometry { changes } => {
                 for change in changes {
@@ -150,6 +152,17 @@ impl DocumentModel {
             DocumentOp::DeleteNodes { node_ids } => {
                 let ids: HashSet<NodeId> = node_ids.iter().copied().collect();
                 self.rects.retain(|rect| !ids.contains(&rect.id));
+            }
+            DocumentOp::RestoreNodes { nodes } => {
+                let mut restored = nodes.clone();
+                restored.sort_by_key(|(_, original_index)| *original_index);
+
+                for (rect, original_index) in restored {
+                    if self.rect_index(rect.id).is_none() {
+                        let insert_at = original_index.min(self.rects.len());
+                        self.rects.insert(insert_at, rect);
+                    }
+                }
             }
         }
     }

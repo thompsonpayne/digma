@@ -1,4 +1,4 @@
-use crate::{NodeId, RectNode, Vec2};
+use crate::{NodeId, RectNode, Vec2, ops::DocumentOp};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RectGeometry {
@@ -15,6 +15,25 @@ impl RectGeometry {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct RectFillChange {
+    pub id: NodeId,
+    pub before: [f32; 4],
+    pub after: [f32; 4],
+}
+
+#[derive(Debug, Clone)]
+pub struct HistoryEntry {
+    pub forward: DocumentOp,
+    pub inverse: DocumentOp,
+}
+
+#[derive(Debug, Clone)]
+pub struct HistoryGroup {
+    pub entries: Vec<HistoryEntry>,
+    pub selection_before: Vec<NodeId>,
+    pub selection_after: Vec<NodeId>,
+}
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct RectGeometryChange {
     pub id: NodeId,
@@ -45,11 +64,4 @@ pub enum ToolCommand {
     },
 
     SetRectsFill(Vec<RectFillChange>),
-}
-
-#[derive(Debug, Clone)]
-pub struct RectFillChange {
-    pub id: NodeId,
-    pub before: [f32; 4],
-    pub after: [f32; 4],
 }
