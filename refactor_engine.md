@@ -230,11 +230,11 @@ The app should keep working as a local editor while the architecture is being sp
 
 ## Current Progress
 
-Status as of 2026-03-30:
+Status as of 2026-04-05:
 
 - Phase 1: completed
 - Phase 2: completed
-- Phase 3: not started
+- Phase 3: completed
 - Phase 4: not started
 - Phase 5: not started
 - Phase 6: not started
@@ -377,6 +377,53 @@ This is the future sync protocol boundary. Backend messages, persistence logs, a
 ### Objective
 
 Make undo/redo operation-based rather than ad hoc engine-state based.
+
+### Current status
+
+**Completed.** The engine now stores local history as invertible document-op groups.
+
+Completed items:
+
+- Removed `ToolCommand` from the engine history path and replaced it with:
+  - `HistoryEntry { forward, inverse }`
+  - `HistoryGroup { entries, selection_before, selection_after }`
+- Changed `Engine` undo/redo storage from `Vec<ToolCommand>` to `Vec<HistoryGroup>`
+- Added `DocumentOp::RestoreNodes` in `ops.rs` so delete undo can flow through the document op layer
+- Updated `DocumentModel::apply_op()` in `types.rs` to handle `RestoreNodes`
+- Made `DocumentOp::CreateRect` idempotent in `apply_op()` by skipping duplicate IDs on replay/redo
+- Replaced `apply_command()` with history-group helpers in `engine.rs`:
+  - `push_history_group()`
+  - `apply_history_group()`
+- Moved undo/redo execution to explicit forward/inverse document op application:
+  - redo applies forward ops in entry order
+  - undo applies inverse ops in reverse entry order
+- Kept selection restoration in local history metadata instead of embedding it in `DocumentOp`
+- Updated commit points in `tick()` to build history groups directly for:
+  - move drag commits
+  - resize drag commits
+  - rect creation
+  - fill changes
+  - reorder operations
+  - delete operations
+- Preserved the current preview model for move/resize:
+  - drag preview still mutates the local document during pointer move
+  - pointer-up records invertible history without double-applying the forward geometry op
+- Added regression tests covering Phase 3 history behavior:
+  - create undo/redo
+  - move undo/redo
+  - resize undo/redo
+  - fill undo/redo
+  - reorder undo/redo
+  - delete undo/redo
+  - redo stack clearing after a new edit
+- Verified the full engine suite passes with `cargo test -p engine`
+
+Design decisions:
+
+- Inverse ops are constructed at commit time rather than via a generic `DocumentOp::inverse()` helper
+- `HistoryGroup` stores selection snapshots once per user action instead of once per entry
+- The shared document op format remains free of local-only UI concerns
+- Reorder undo currently uses the opposite `ReorderPlacement` for inversion, matching the engine's current single-step reorder semantics
 
 ### Changes
 
