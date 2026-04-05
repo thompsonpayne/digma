@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
 use crate::drag::DragState;
-use crate::history::{HistoryEntry, HistoryGroup, RectFillChange};
+use crate::history::RectFillChange;
 use crate::input::{EngineOutput, InputBatch, InputEvent};
 use crate::ops::{DocumentOp, ReorderPlacement};
 use crate::render_scene::{RectInstance, RenderScene};
 use crate::types::{DocumentModel, NodeId, RectNode, Vec2};
-use crate::{EditorSession, RectGeometry, RectGeometryChange};
+use crate::{EditorSession, HistoryEntry, HistoryGroup, RectGeometry, RectGeometryChange};
 
 pub struct Engine {
     pub document: DocumentModel,
@@ -230,7 +230,7 @@ impl Engine {
                                     drag.previous_selection,
                                     vec![rect.id],
                                 ),
-                                false,
+                                true,
                             ))
                         }
                         _ => None,
@@ -248,12 +248,7 @@ impl Engine {
                 }
                 InputEvent::SetSelectionFill { color } => {
                     let selected: HashSet<NodeId> = self.session.selected.iter().copied().collect();
-                    //
-                    // for rect in &mut self.document.rects {
-                    //     if selected.contains(&rect.id) {
-                    //         rect.color = [color.r, color.g, color.b, color.a];
-                    //     }
-                    // }
+
                     let changes: Vec<RectFillChange> = self
                         .document
                         .rects
@@ -460,6 +455,7 @@ mod test {
     use crate::CursorStyle;
     use crate::PendingSelectionMove;
     use crate::ToolMode;
+    use crate::input::RgbaColor;
 
     use super::*;
 
@@ -472,6 +468,45 @@ mod test {
     fn assert_vec2_approx(a: Vec2, b: Vec2, eps: f32) {
         assert_approx(a.x, b.x, eps);
         assert_approx(a.y, b.y, eps);
+    }
+
+    fn rect_ids(engine: &Engine) -> Vec<NodeId> {
+        engine.document.rects.iter().map(|rect| rect.id).collect()
+    }
+
+    fn engine_with_three_rects() -> Engine {
+        let mut doc = DocumentModel::new();
+        let id0 = doc.alloc_id();
+        let id1 = doc.alloc_id();
+        let id2 = doc.alloc_id();
+
+        doc.rects.push(RectNode {
+            id: id0,
+            pos: Vec2::new(50.0, 50.0),
+            size: Vec2::new(100.0, 100.0),
+            color: [1.0, 0.0, 0.0, 1.0],
+        });
+
+        doc.rects.push(RectNode {
+            id: id1,
+            pos: Vec2::new(200.0, 50.0),
+            size: Vec2::new(100.0, 100.0),
+            color: [0.0, 1.0, 0.0, 1.0],
+        });
+
+        doc.rects.push(RectNode {
+            id: id2,
+            pos: Vec2::new(350.0, 50.0),
+            size: Vec2::new(100.0, 100.0),
+            color: [0.0, 0.0, 1.0, 1.0],
+        });
+
+        Engine {
+            document: doc,
+            session: EditorSession::default(),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+        }
     }
 
     #[test]
@@ -1012,6 +1047,109 @@ mod test {
     }
 
     #[test]
+    fn undo_redo_bring_forward_restores_z_order() {
+        let mut engine = engine_with_three_rects();
+        let original = rect_ids(&engine);
+        engine.session.selected = vec![original[0]];
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::BringForward],
+            tool: ToolMode::Select,
+        });
+
+        let after_bring_forward = rect_ids(&engine);
+        assert_eq!(
+            after_bring_forward,
+            vec![original[1], original[0], original[2]]
+        );
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Undo],
+            tool: ToolMode::Select,
+        });
+        assert_eq!(rect_ids(&engine), original);
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Redo],
+            tool: ToolMode::Select,
+        });
+        assert_eq!(rect_ids(&engine), after_bring_forward);
+    }
+
+    #[test]
+    fn undo_redo_delete_restores_nodes_and_order() {
+        let mut engine = engine_with_two_rects();
+        let original_ids = rect_ids(&engine);
+        let deleted_id = original_ids[0];
+
+        engine.session.selected = vec![deleted_id];
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::DeleteSelected],
+            tool: ToolMode::Select,
+        });
+
+        assert_eq!(rect_ids(&engine), vec![original_ids[1]]);
+        assert!(engine.session.selected.is_empty());
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Undo],
+            tool: ToolMode::Select,
+        });
+
+        assert_eq!(rect_ids(&engine), original_ids);
+        assert_eq!(engine.session.selected, vec![deleted_id]);
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Redo],
+            tool: ToolMode::Select,
+        });
+
+        assert_eq!(rect_ids(&engine), vec![original_ids[1]]);
+        assert!(engine.session.selected.is_empty());
+    }
+
+    #[test]
+    fn redo_stack_clears_after_new_edit() {
+        let mut engine = engine_with_one_rect();
+        let id = engine.document.rects[0].id;
+        engine.session.selected = vec![id];
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::SetSelectionFill {
+                color: RgbaColor {
+                    r: 0.2,
+                    g: 0.4,
+                    b: 0.6,
+                    a: 1.0,
+                },
+            }],
+            tool: ToolMode::Select,
+        });
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Undo],
+            tool: ToolMode::Select,
+        });
+
+        assert_eq!(engine.redo_stack.len(), 1);
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::SetSelectionFill {
+                color: RgbaColor {
+                    r: 0.8,
+                    g: 0.1,
+                    b: 0.2,
+                    a: 1.0,
+                },
+            }],
+            tool: ToolMode::Select,
+        });
+
+        assert!(engine.redo_stack.is_empty());
+    }
+
+    #[test]
     fn cursor_defaults_to_default_with_not_hover() {
         let engine = engine_with_one_rect();
         let cursor = engine
@@ -1071,5 +1209,210 @@ mod test {
             .session
             .compute_cursor(&ToolMode::Select, &engine.document.rects);
         assert_eq!(cursor, CursorStyle::Move);
+    }
+
+    #[test]
+    fn undo_redo_create_rect_restores_document_and_selection() {
+        let mut engine = engine_with_one_rect();
+        let initial_count = engine.document.rects.len();
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(200.0, 200.0),
+                shift: false,
+                button: 0,
+            }],
+            tool: ToolMode::Rect,
+        });
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerMove {
+                screen_px: Vec2::new(260.0, 240.0),
+                buttons: 1,
+            }],
+            tool: ToolMode::Rect,
+        });
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerUp {
+                screen_px: Vec2::new(260.0, 240.0),
+                button: 0,
+            }],
+            tool: ToolMode::Rect,
+        });
+
+        assert_eq!(engine.document.rects.len(), initial_count + 1);
+        let created_id = engine.document.rects.last().unwrap().id;
+        assert_eq!(engine.session.selected, vec![created_id]);
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Undo],
+            tool: ToolMode::Select,
+        });
+
+        assert_eq!(engine.document.rects.len(), initial_count);
+        assert!(engine.document.rect(created_id).is_none());
+        assert!(engine.session.selected.is_empty());
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Redo],
+            tool: ToolMode::Select,
+        });
+
+        assert_eq!(engine.document.rects.len(), initial_count + 1);
+        assert_eq!(engine.document.rects.last().unwrap().id, created_id);
+        assert_eq!(engine.session.selected, vec![created_id]);
+    }
+
+    #[test]
+    fn undo_redo_move_restores_geometry() {
+        let mut engine = engine_with_one_rect();
+        let id = engine.document.rects[0].id;
+        let origin = engine.document.rects[0].pos;
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0),
+                shift: false,
+                button: 0,
+            }],
+            tool: ToolMode::Select,
+        });
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(100.0, 100.0),
+                shift: false,
+                button: 0,
+            }],
+            tool: ToolMode::Select,
+        });
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerMove {
+                screen_px: Vec2::new(160.0, 150.0),
+                buttons: 1,
+            }],
+            tool: ToolMode::Select,
+        });
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerUp {
+                screen_px: Vec2::new(160.0, 150.0),
+                button: 0,
+            }],
+            tool: ToolMode::Select,
+        });
+
+        let moved = engine.document.rect(id).unwrap().pos;
+        assert_vec2_approx(moved, Vec2::new(origin.x + 60.0, origin.y + 50.0), 1e-4);
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Undo],
+            tool: ToolMode::Select,
+        });
+
+        assert_vec2_approx(engine.document.rect(id).unwrap().pos, origin, 1e-4);
+        assert_eq!(engine.session.selected, vec![id]);
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Redo],
+            tool: ToolMode::Select,
+        });
+        assert_vec2_approx(engine.document.rect(id).unwrap().pos, moved, 1e-4);
+        assert_eq!(engine.session.selected, vec![id]);
+    }
+
+    #[test]
+    fn undo_redo_resize_restores_geometry() {
+        let mut engine = engine_with_one_rect();
+        let id = engine.document.rects[0].id;
+        let origin_pos = engine.document.rects[0].pos;
+        let origin_size = engine.document.rects[0].size;
+
+        engine.session.selected = vec![id];
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerDown {
+                screen_px: Vec2::new(50.0, 50.0),
+                shift: false,
+                button: 0,
+            }],
+            tool: ToolMode::Select,
+        });
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerMove {
+                screen_px: Vec2::new(30.0, 30.0),
+                buttons: 1,
+            }],
+            tool: ToolMode::Select,
+        });
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::PointerUp {
+                screen_px: Vec2::new(30.0, 30.0),
+                button: 0,
+            }],
+            tool: ToolMode::Select,
+        });
+
+        let resized = *engine.document.rect(id).unwrap();
+        assert_vec2_approx(resized.pos, Vec2::new(30.0, 30.0), 1e-4);
+        assert_vec2_approx(resized.size, Vec2::new(120.0, 120.0), 1e-4);
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Undo],
+            tool: ToolMode::Select,
+        });
+
+        let rect = engine.document.rect(id).unwrap();
+        assert_vec2_approx(rect.pos, origin_pos, 1e-4);
+        assert_vec2_approx(rect.size, origin_size, 1e-4);
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Redo],
+            tool: ToolMode::Select,
+        });
+
+        let rect = engine.document.rect(id).unwrap();
+        assert_vec2_approx(rect.pos, resized.pos, 1e-4);
+        assert_vec2_approx(rect.size, resized.size, 1e-4);
+    }
+
+    #[test]
+    fn undo_redo_fill_restores_color() {
+        let mut engine = engine_with_one_rect();
+        let id = engine.document.rects[0].id;
+        let original = engine.document.rects[0].color;
+        engine.session.selected = vec![id];
+
+        let changed = [0.25, 0.5, 0.75, 1.0];
+
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::SetSelectionFill {
+                color: RgbaColor {
+                    r: changed[0],
+                    g: changed[1],
+                    b: changed[2],
+                    a: changed[3],
+                },
+            }],
+            tool: ToolMode::Select,
+        });
+
+        assert_eq!(engine.document.rect(id).unwrap().color, changed);
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Undo],
+            tool: ToolMode::Select,
+        });
+
+        assert_eq!(engine.document.rect(id).unwrap().color, original);
+        engine.tick(&InputBatch {
+            events: vec![InputEvent::Redo],
+            tool: ToolMode::Select,
+        });
+
+        assert_eq!(engine.document.rect(id).unwrap().color, changed);
     }
 }

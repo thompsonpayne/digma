@@ -40,28 +40,3 @@ pub struct RectGeometryChange {
     pub before: RectGeometry,
     pub after: RectGeometry,
 }
-
-#[derive(Debug, Clone)]
-pub enum ToolCommand {
-    CreateRect {
-        rect: RectNode,
-        previous_selection: Vec<NodeId>,
-        next_selection: Vec<NodeId>,
-    },
-
-    // move and resize
-    SetRectsGeometry {
-        changes: Vec<RectGeometryChange>,
-    },
-
-    BringForward(Vec<NodeId>),
-    SendBackward(Vec<NodeId>),
-
-    Delete {
-        rects: Vec<(RectNode, usize)>,   // (rect, original_index) pairs
-        previous_selection: Vec<NodeId>, // what self.session.selected was before applying delete
-        next_selection: Vec<NodeId>, // what self.session.selected should be after applying delete
-    },
-
-    SetRectsFill(Vec<RectFillChange>),
-}

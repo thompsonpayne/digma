@@ -11,7 +11,7 @@ mod types;
 pub use camera::Camera;
 pub use drag::{Corner, DragState, HandleHit, PendingSelectionMove};
 pub use engine::Engine;
-pub use history::{RectGeometry, RectGeometryChange, ToolCommand};
+pub use history::{HistoryEntry, HistoryGroup, RectGeometry, RectGeometryChange};
 pub use input::{CursorStyle, EngineOutput, InputBatch, InputEvent, ToolMode};
 pub use render_scene::{OverlayScene, RectInstance, RenderScene};
 pub use session::EditorSession;
