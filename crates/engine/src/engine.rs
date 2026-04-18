@@ -6,14 +6,43 @@ use crate::input::{EngineOutput, InputBatch, InputEvent};
 use crate::ops::{DocumentOp, ReorderPlacement};
 use crate::render_scene::{RectInstance, RenderScene};
 use crate::types::{DocumentModel, NodeId, RectNode, Vec2};
-use crate::{EditorSession, HistoryEntry, HistoryGroup, RectGeometry, RectGeometryChange};
+use crate::{
+    ActorId, EditorSession, HistoryEntry, HistoryGroup, OpEnvelope, OpId, RectGeometry,
+    RectGeometryChange,
+};
 
-pub struct Engine {
-    pub document: DocumentModel,
-    pub session: EditorSession,
+struct LocalOpState {
+    actor_id: ActorId,
+    next_node_counter: u64,
+    next_op_counter: u64,
+}
 
-    undo_stack: Vec<HistoryGroup>,
-    redo_stack: Vec<HistoryGroup>,
+impl LocalOpState {
+    fn new(actor_id: ActorId) -> Self {
+        Self {
+            actor_id,
+            next_node_counter: 1,
+            next_op_counter: 1,
+        }
+    }
+
+    fn alloc_node_id(&mut self) -> NodeId {
+        let id = NodeId::new(self.actor_id, self.next_node_counter);
+        self.next_node_counter += 1;
+        id
+    }
+
+    fn alloc_op_id(&mut self) -> OpId {
+        let id = OpId::new(self.next_op_counter);
+        self.next_op_counter += 1;
+        id
+    }
+
+    #[cfg(test)]
+    fn with_next_node_counter(mut self, next_node_counter: u64) -> Self {
+        self.next_node_counter = next_node_counter;
+        self
+    }
 }
 
 fn invert_geometry_changes(changes: &[RectGeometryChange]) -> Vec<RectGeometryChange> {
@@ -51,39 +80,72 @@ fn single_entry_group(
     }
 }
 
+pub struct Engine {
+    pub document: DocumentModel,
+    pub session: EditorSession,
+    local_op_state: LocalOpState,
+
+    undo_stack: Vec<HistoryGroup>,
+    redo_stack: Vec<HistoryGroup>,
+}
+
 impl Engine {
     pub fn new() -> Self {
-        let mut doc = DocumentModel::new();
+        Self::with_actor_id(ActorId::new(1))
+    }
 
-        let rects = vec![
+    pub fn with_actor_id(actor_id: ActorId) -> Self {
+        let mut engine = Self {
+            document: DocumentModel::new(),
+            session: EditorSession::default(),
+            redo_stack: Vec::new(),
+            undo_stack: Vec::new(),
+            local_op_state: LocalOpState::new(actor_id),
+        };
+
+        engine.document.rects = vec![
             RectNode {
-                id: doc.alloc_id(),
+                id: engine.alloc_local_node_id(),
                 pos: Vec2::new(100.0, 100.0),
                 size: Vec2::new(120.0, 80.0),
                 color: [0.2, 0.7, 0.9, 1.0],
             },
             RectNode {
-                id: doc.alloc_id(),
+                id: engine.alloc_local_node_id(),
                 pos: Vec2::new(300.0, 220.0),
                 size: Vec2::new(140.0, 80.0),
                 color: [0.9, 0.3, 0.9, 1.0],
             },
             RectNode {
-                id: doc.alloc_id(),
+                id: engine.alloc_local_node_id(),
                 pos: Vec2::new(600.0, 900.0),
                 size: Vec2::new(200.0, 100.0),
                 color: [0.5, 0.8, 0.4, 1.0],
             },
         ];
 
-        doc.rects = rects;
+        engine
+    }
 
-        Self {
-            document: doc,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
-            session: EditorSession::default(),
+    fn alloc_local_node_id(&mut self) -> NodeId {
+        self.local_op_state.alloc_node_id()
+    }
+
+    fn alloc_local_op_id(&mut self) -> OpId {
+        self.local_op_state.alloc_op_id()
+    }
+
+    pub fn envelope_for_local_op(&mut self, op: DocumentOp) -> OpEnvelope {
+        OpEnvelope {
+            op_id: self.alloc_local_op_id(),
+            actor_id: self.local_op_state.actor_id,
+            base_version: self.document.version,
+            op,
         }
+    }
+
+    pub fn apply_envelope(&mut self, envelope: &OpEnvelope) -> bool {
+        self.document.apply_op(&envelope.op)
     }
 
     /// Process a batch of input events and return the new engine output.
@@ -210,7 +272,7 @@ impl Engine {
                             let h = raw_h.max(min_size);
 
                             let rect = RectNode {
-                                id: self.document.alloc_id(),
+                                id: self.alloc_local_node_id(),
                                 pos: Vec2::new(min_x, min_y),
                                 size: Vec2::new(w, h),
                                 color: [0.769, 0.769, 0.769, 1.0],
@@ -451,11 +513,11 @@ impl Default for Engine {
 
 #[cfg(test)]
 mod test {
+    use crate::input::RgbaColor;
     use crate::Camera;
     use crate::CursorStyle;
     use crate::PendingSelectionMove;
     use crate::ToolMode;
-    use crate::input::RgbaColor;
 
     use super::*;
 
@@ -476,9 +538,9 @@ mod test {
 
     fn engine_with_three_rects() -> Engine {
         let mut doc = DocumentModel::new();
-        let id0 = doc.alloc_id();
-        let id1 = doc.alloc_id();
-        let id2 = doc.alloc_id();
+        let id0 = NodeId::new(ActorId::new(1), 1);
+        let id1 = NodeId::new(ActorId::new(1), 2);
+        let id2 = NodeId::new(ActorId::new(1), 3);
 
         doc.rects.push(RectNode {
             id: id0,
@@ -506,6 +568,7 @@ mod test {
             session: EditorSession::default(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            local_op_state: LocalOpState::new(ActorId::new(1)).with_next_node_counter(4),
         }
     }
 
@@ -564,6 +627,7 @@ mod test {
                 },
                 ..EditorSession::default()
             },
+            local_op_state: LocalOpState::new(ActorId::new(1)),
         };
 
         let batch = InputBatch {
@@ -593,6 +657,7 @@ mod test {
                 },
                 ..EditorSession::default()
             },
+            local_op_state: LocalOpState::new(ActorId::new(1)),
         };
 
         let pivot = Vec2::new(300.0, 120.0);
@@ -669,7 +734,7 @@ mod test {
     /// Helper: build a minimal Engine with a single 100x100 rect at (50, 50).
     fn engine_with_one_rect() -> Engine {
         let mut doc = DocumentModel::new();
-        let id = doc.alloc_id();
+        let id = NodeId::new(ActorId::new(1), 1);
         doc.rects.push(RectNode {
             id,
             pos: Vec2::new(50.0, 50.0),
@@ -681,14 +746,16 @@ mod test {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             session: EditorSession::default(),
+            local_op_state: LocalOpState::new(ActorId::new(1)).with_next_node_counter(2),
         }
     }
 
     /// Helper: build a minimal Engine with two non-overlapping 100x100 rects.
     fn engine_with_two_rects() -> Engine {
         let mut doc = DocumentModel::new();
-        let id0 = doc.alloc_id();
-        let id1 = doc.alloc_id();
+        let id0 = NodeId::new(ActorId::new(1), 1);
+        let id1 = NodeId::new(ActorId::new(1), 2);
+
         doc.rects.push(RectNode {
             id: id0,
             pos: Vec2::new(50.0, 50.0),
@@ -706,6 +773,7 @@ mod test {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             session: EditorSession::default(),
+            local_op_state: LocalOpState::new(ActorId::new(1)).with_next_node_counter(3),
         }
     }
 
@@ -1414,5 +1482,67 @@ mod test {
         });
 
         assert_eq!(engine.document.rect(id).unwrap().color, changed);
+    }
+
+    #[test]
+    fn node_ids_are_unique_across_actors() {
+        let a = NodeId::new(ActorId::new(1), 1);
+        let b = NodeId::new(ActorId::new(2), 1);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn envelope_for_local_op_captures_actor_and_base_version() {
+        let mut engine = Engine::with_actor_id(ActorId::new(7));
+        let before = engine.document.version;
+
+        let envelope = engine.envelope_for_local_op(DocumentOp::DeleteNodes {
+            node_ids: vec![engine.document.rects[0].id],
+        });
+
+        assert_eq!(envelope.actor_id, ActorId::new(7));
+        assert_eq!(envelope.base_version, before);
+        assert_eq!(envelope.op_id, OpId::new(1));
+    }
+
+    #[test]
+    fn apply_envelope_increments_document_version_once() {
+        let mut engine = Engine::with_actor_id(ActorId::new(1));
+        let base_version = engine.document.version;
+        let id = NodeId::new(ActorId::new(2), 1);
+
+        let envelope = OpEnvelope {
+            op_id: OpId::new(1),
+            actor_id: ActorId::new(2),
+            base_version,
+            op: DocumentOp::CreateRect {
+                id,
+                pos: Vec2::new(10.0, 20.0),
+                size: Vec2::new(30.0, 40.0),
+                color: [1.0, 0.0, 0.0, 1.0],
+            },
+        };
+
+        assert!(engine.apply_envelope(&envelope));
+        assert_eq!(engine.document.version, base_version.next())
+    }
+
+    #[test]
+    fn duplicate_create_rect_does_not_increment_version() {
+        let mut engine = Engine::with_actor_id(ActorId::new(1));
+        let id = NodeId::new(ActorId::new(8), 1);
+
+        let op = DocumentOp::CreateRect {
+            id,
+            pos: Vec2::new(10.0, 20.0),
+            size: Vec2::new(30.0, 40.0),
+            color: [1.0, 0.0, 0.0, 1.0],
+        };
+
+        assert!(engine.document.apply_op(&op));
+
+        let version_after_first = engine.document.version;
+        assert!(!engine.document.apply_op(&op));
+        assert_eq!(engine.document.version, version_after_first);
     }
 }

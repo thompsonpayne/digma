@@ -1,6 +1,11 @@
-use crate::{NodeId, RectGeometryChange, RectNode, Vec2, history::RectFillChange};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+use crate::{
+    history::RectFillChange, ActorId, DocumentVersion, NodeId, OpId, RectGeometryChange, RectNode,
+    Vec2,
+};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DocumentOp {
     CreateRect {
         id: NodeId,
@@ -27,8 +32,16 @@ pub enum DocumentOp {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReorderPlacement {
     Forward,
     Backward,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpEnvelope {
+    pub op_id: OpId,
+    pub actor_id: ActorId,
+    pub base_version: DocumentVersion,
+    pub op: DocumentOp,
 }

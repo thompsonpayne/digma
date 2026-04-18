@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{NodeId, RectNode, Vec2, ops::DocumentOp};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RectGeometry {
     pub pos: Vec2,
     pub size: Vec2,
@@ -15,7 +17,7 @@ impl RectGeometry {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RectFillChange {
     pub id: NodeId,
     pub before: [f32; 4],
@@ -34,7 +36,7 @@ pub struct HistoryGroup {
     pub selection_before: Vec<NodeId>,
     pub selection_after: Vec<NodeId>,
 }
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RectGeometryChange {
     pub id: NodeId,
     pub before: RectGeometry,
