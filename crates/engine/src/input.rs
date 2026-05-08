@@ -40,6 +40,9 @@ pub enum InputEvent {
     },
     Undo,
     Redo,
+    BringForward,
+    SendBackward,
+    DeleteSelected,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

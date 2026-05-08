@@ -43,32 +43,3 @@ impl Document {
         NodeId(id)
     }
 }
-
-#[derive(Debug)]
-pub struct EditorSnapshot {
-    doc: Document,
-    selected: Vec<NodeId>,
-}
-
-#[derive(Debug)]
-pub struct History {
-    undo: Vec<Command>,
-    redo: Vec<Command>,
-}
-
-#[derive(Debug)]
-pub enum Command {
-    Transaction {
-        kind: CommandKind,
-        before: EditorSnapshot,
-        after: EditorSnapshot,
-    },
-}
-
-#[derive(Debug)]
-pub enum CommandKind {
-    CreateRect,
-    MoveRects,
-    ResizeRect,
-    SetSelectionFill,
-}

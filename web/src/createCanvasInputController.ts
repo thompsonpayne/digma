@@ -4,7 +4,7 @@ import type {
   InputBatch,
   InputEvent,
   Point,
-  ToolMode as ToolModeValue,
+  ToolModeType as ToolModeValue,
 } from "./editorTypes";
 import { ToolMode } from "./editorTypes";
 
@@ -109,6 +109,12 @@ export function createCanvasInputController(
 
         if (isPrimaryModifer && key === "y") {
           pushEvent({ type: "redo" });
+          event.preventDefault();
+          return;
+        }
+
+        if (key === "d") {
+          pushEvent({ type: "delete_selected" });
           event.preventDefault();
           return;
         }

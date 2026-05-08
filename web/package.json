@@ -19,6 +19,7 @@
 		"@testing-library/jest-dom": "^6.9.1",
 		"@testing-library/user-event": "^14.6.1",
 		"@types/node": "^24.10.13",
+		"daisyui": "^5.5.19",
 		"jsdom": "^28.1.0",
 		"tailwindcss": "^4.2.1",
 		"typescript": "~5.9.3",

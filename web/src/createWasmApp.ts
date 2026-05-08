@@ -1,7 +1,7 @@
 import type { Accessor } from "solid-js";
 import { createSignal, onCleanup, onMount } from "solid-js";
 import type { createCanvasInputController } from "./createCanvasInputController";
-import type { CameraView, TickOutput, ToolMode } from "./editorTypes";
+import type { CameraView, TickOutput, ToolModeType } from "./editorTypes";
 
 type WasmAppInstance = import("./wasm/app_wasm/app_wasm").App;
 type WasmModule = typeof import("./wasm/app_wasm/app_wasm");
@@ -9,7 +9,7 @@ type WasmModule = typeof import("./wasm/app_wasm/app_wasm");
 type CreateWasmAppOptions = {
   canvas: Accessor<HTMLCanvasElement>;
   input: ReturnType<typeof createCanvasInputController>;
-  toolMode: Accessor<ToolMode>;
+  toolMode: Accessor<ToolModeType>;
 };
 
 const CURSOR_MAP: Record<string, string> = {
